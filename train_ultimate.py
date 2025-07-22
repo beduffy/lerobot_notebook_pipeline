@@ -1,10 +1,10 @@
----
-jupytext_version: 1.17.2
-kernelspec:
-  display_name: cloudspace
-  language: python
-  name: cloudspace
----
+# ---
+# jupytext_version: 1.17.2
+# kernelspec:
+#   display_name: cloudspace
+#   language: python
+#   name: cloudspace
+# ---
 
 # %%
 # Test imports after fix
@@ -66,8 +66,12 @@ from lerobot.common.policies.act.modeling_act import ACTPolicy
 from lerobot.configs.types import FeatureType
 from lerobot.common.datasets.factory import resolve_delta_timestamps
 import torchvision
-from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, visualize_sample
-from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise, visualize_augmentations, plot_action_histogram
+from lerobot_notebook_pipeline.dataset_utils.analysis import (
+    get_dataset_stats, visualize_sample, analyze_overfitting_risk
+)
+from lerobot_notebook_pipeline.dataset_utils.visualization import (
+    AddGaussianNoise, visualize_augmentations
+)
 from lerobot_notebook_pipeline.dataset_utils.training import train_model
 
 # %%
@@ -179,6 +183,17 @@ for key, stats in dataset_stats["dataset_stats"].items():
 # Visualize a sample from the dataset
 print("\n🖼️ Visualizing a sample from the dataset:")
 visualize_sample(simple_dataset, 0)
+
+# %% [markdown]
+# ### 🔍 Quick Dataset Overview
+#
+# For comprehensive dataset analysis, use: `python analyse_dataset.py --dataset "bearlover365/red_cube_always_in_same_place"`
+# For visualization demos, use: `python demo_visualizations.py --dataset "bearlover365/red_cube_always_in_same_place"`
+
+# %%
+# Quick overfitting risk check
+print("⚠️  Quick overfitting risk assessment...")
+analyze_overfitting_risk(simple_dataset)
 
 
 # %% [markdown]
@@ -395,6 +410,9 @@ try:
         
         # Apply our new utility function to see the difference
         visualize_augmentations(original_image, transform)
+        
+        print("\n💡 For comprehensive augmentation analysis, use:")
+        print("   python demo_visualizations.py --dataset 'bearlover365/red_cube_always_in_same_place' --demo-type augmentation")
     else:
         print("❌ Could not find an image key in the sample data.")
     
