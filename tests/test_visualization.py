@@ -10,6 +10,13 @@ def sample_image():
     """A pytest fixture to provide a sample image for testing."""
     return torch.rand(3, 128, 128)
 
+
+@pytest.fixture
+def simple_dataset():
+    """A pytest fixture to provide a simple LeRobotDataset for testing."""
+    # Using a real but small dataset from the hub for realistic testing
+    return LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+
 def test_visualize_augmentations(sample_image):
     """
     Tests the visualize_augmentations function.

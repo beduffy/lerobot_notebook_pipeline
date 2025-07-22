@@ -1,6 +1,6 @@
 import pytest
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats
+from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, visualize_sample
 import matplotlib.pyplot as plt
 import torch
 
@@ -22,7 +22,7 @@ def test_get_dataset_stats(simple_dataset):
     # Check for expected keys
     assert "num_steps" in stats
     assert "num_episodes" in stats
-    assert "observation.image_shape" in stats
+    assert "observation.images.front_shape" in stats
     assert "action_shape" in stats
     assert "dataset_stats" in stats
 

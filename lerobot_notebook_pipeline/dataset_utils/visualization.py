@@ -1,6 +1,7 @@
 import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 class AddGaussianNoise:
     """
