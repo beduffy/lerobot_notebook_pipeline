@@ -113,7 +113,7 @@ except ImportError:
 
 # %%
 # Let's create a simple dataset first to inspect it (no transforms yet)
-simple_dataset = LeRobotDataset("omy_pnp", root='./demo_data')
+simple_dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
 
 print(f"🗂️  The dataset contains {len(simple_dataset)} steps of experience.")
 print(f"🎯  Number of episodes: {len(simple_dataset.meta.episodes)}")
@@ -150,11 +150,11 @@ for key, value in sample.items():
 # creating the policy:
 #   - input/output shapes: to properly size the policy
 #   - dataset stats: for normalization and denormalization of input/outputs
-dataset_metadata = LeRobotDatasetMetadata("omy_pnp", root='./demo_data')
-features = dataset_to_policy_features(dataset_metadata.features)
-output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
-input_features = {key: ft for key, ft in features.items() if key not in output_features}
-input_features.pop("observation.wrist_image")
+dataset_metadata = LeRobotDatasetMetadata("bearlover365/red_cube_always_in_same_place")
+# features = dataset_to_policy_features(dataset_metadata.features)
+# output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+# input_features = {key: ft for key, ft in features.items() if key not in output_features}
+# input_features.pop("observation.wrist_image")
 # Policies are initialized with a configuration class, in this case `DiffusionConfig`. For this example,
 # we'll just use the defaults and so no arguments other than input/output features need to be passed.
 cfg = ACTConfig(input_features=input_features, output_features=output_features, chunk_size= 10, n_action_steps=10)
@@ -286,7 +286,7 @@ print("✅ Transform already defined above - ready for dataset creation!")
 # We can then instantiate the dataset with these delta_timestamps configuration.
 print("🔄 Creating dataset with transforms...")
 try:
-    dataset = LeRobotDataset("omy_pnp", delta_timestamps=delta_timestamps, root='./demo_data', image_transforms=transform)
+    dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", delta_timestamps=delta_timestamps, image_transforms=transform)
     print("✅ Dataset created successfully!")
 except Exception as e:
     print(f"❌ Error creating dataset with transforms: {e}")
