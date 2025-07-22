@@ -1,17 +1,10 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: ipynb,py:percent
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.17.2
-#   kernelspec:
-#     display_name: cloudspace
-#     language: python
-#     name: python3
-# ---
+---
+jupytext_version: 1.17.2
+kernelspec:
+  display_name: cloudspace
+  language: python
+  name: cloudspace
+---
 
 # %%
 # Test imports after fix
@@ -73,6 +66,9 @@ from lerobot.common.policies.act.modeling_act import ACTPolicy
 from lerobot.configs.types import FeatureType
 from lerobot.common.datasets.factory import resolve_delta_timestamps
 import torchvision
+from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, visualize_sample
+from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise, visualize_augmentations, plot_action_histogram
+from lerobot_notebook_pipeline.dataset_utils.training import train_model
 
 # %%
 device = torch.device("cuda")
@@ -81,6 +77,38 @@ device = torch.device("cuda")
 # Adjust as you prefer. 5000 steps are needed to get something worth evaluating.
 training_steps = 3000
 log_freq = 100
+
+# %%
+# 🔧 Additional PIL/Image Compatibility Fixes
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
+
+# Additional PIL fixes for mode issues in version 11.x
+try:
+    from PIL import Image
+    import numpy as np
+    
+    # Ensure PIL images work correctly with matplotlib
+    def safe_image_display(img_tensor):
+        """Safely convert tensor to displayable format"""
+        if hasattr(img_tensor, 'numpy'):
+            img_array = img_tensor.numpy()
+        else:
+            img_array = img_tensor
+            
+        # Ensure correct format for matplotlib
+        if img_array.ndim == 3 and img_array.shape[0] == 3:  # CHW format
+            img_array = img_array.transpose(1, 2, 0)
+        
+        # Clip values to valid range
+        img_array = np.clip(img_array, 0, 1)
+        return img_array
+    
+    print("✅ Image compatibility functions loaded")
+    
+except Exception as e:
+    print(f"⚠️  PIL compatibility setup warning: {e}")
+    print("💡 Image display may have issues but training will still work")
 
 # Check for potential PIL issues and provide helpful guidance
 try:
@@ -91,14 +119,29 @@ try:
     # Check if we have a known problematic version
     if "10." in pil_version or "11." in pil_version:
         print("⚠️  Note: You might encounter PIL AttributeError issues with this version.")
-        print("💡 If you see PIL errors, the notebook has fallbacks to handle them gracefully.")
-        print("   Training will still work, just some visualizations might be skipped.")
+        print("💡 Applying compatibility fixes for PIL version 11.x...")
+        
+        # Apply PIL compatibility fixes for version 11.x
+        # Fix the mode attribute issue
+        if not hasattr(Image, '_original_fromarray'):
+            Image._original_fromarray = Image.fromarray
+            def patched_fromarray(obj, mode=None):
+                img = Image._original_fromarray(obj, mode)
+                if hasattr(img, '_mode'):
+                    img.mode = img._mode
+                return img
+            Image.fromarray = patched_fromarray
+            
+        print("✅ PIL compatibility patches applied!")
     else:
         print("✅ PIL version looks good!")
         
 except ImportError:
     print("❌ PIL/Pillow not found - this might cause issues")
     print("💡 Consider installing: pip install pillow")
+except Exception as e:
+    print(f"⚠️  PIL setup issue: {e}")
+    print("💡 Will attempt to work around PIL issues during execution")
 
 # %% [markdown]
 # ## Policy Configuration and Initialize
@@ -113,13 +156,17 @@ except ImportError:
 
 # %%
 # Let's create a simple dataset first to inspect it (no transforms yet)
-simple_dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+simple_dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", video_backend="pyav")
 
-print(f"🗂️  The dataset contains {len(simple_dataset)} steps of experience.")
-print(f"🎯  Number of episodes: {len(simple_dataset.meta.episodes)}")
+# Use our new utility function to get and print dataset stats
+dataset_stats = get_dataset_stats(simple_dataset)
+print("📊 Dataset Statistics:")
+for key, value in dataset_stats.items():
+    if key != "dataset_stats":
+        print(f"  {key}: {value}")
 
-print("\n📈 Dataset statistics used for normalization:")
-for key, stats in simple_dataset.meta.stats.items():
+print("\n📈 Normalization Stats:")
+for key, stats in dataset_stats["dataset_stats"].items():
     print(f"  {key}:")
     if 'mean' in stats:
         print(f"    mean: {stats['mean']}")
@@ -129,14 +176,128 @@ for key, stats in simple_dataset.meta.stats.items():
         print(f"    max:  {stats['max']}")
     print()
 
-# Let's look at one sample to understand the data structure
-sample = simple_dataset[0]
-print("🔍 Sample data structure:")
-for key, value in sample.items():
-    if isinstance(value, torch.Tensor):
-        print(f"  {key}: shape {value.shape}, dtype {value.dtype}")
-    else:
-        print(f"  {key}: {type(value)} - {value}")
+# Visualize a sample from the dataset
+print("\n🖼️ Visualizing a sample from the dataset:")
+visualize_sample(simple_dataset, 0)
+
+
+# %% [markdown]
+# ### 🎬 First Episode Visualization
+#
+# Let's create and display a video of the first demonstration episode to see what the robot is actually doing!
+
+# %%
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from IPython.display import HTML, display
+import numpy as np
+
+# Increase the animation embed limit to handle larger videos
+plt.rcParams['animation.embed_limit'] = 50  # 50 MB limit
+
+# Get all samples from the first episode (episode_index == 0)
+print("🔍 Extracting frames from the first episode...")
+
+# Find all indices belonging to episode 0
+episode_0_indices = []
+episode_0_frames = []
+episode_0_actions = []
+episode_0_states = []
+
+for i in range(len(simple_dataset)):
+    sample = simple_dataset[i]
+    if sample['episode_index'].item() == 0:  # First episode
+        episode_0_indices.append(i)
+        # Convert image safely using our compatibility function
+        frame_tensor = sample['observation.images.front']
+        frame_display = safe_image_display(frame_tensor)
+        episode_0_frames.append(frame_display)
+        episode_0_actions.append(sample['action'].numpy())
+        episode_0_states.append(sample['observation.state'].numpy())
+
+print(f"✅ Found {len(episode_0_frames)} frames in episode 0")
+if episode_0_frames:
+    print(f"📏 Frame shape: {episode_0_frames[0].shape}")
+    print(f"🎯 Episode spans from step {min(episode_0_indices)} to {max(episode_0_indices)}")
+
+    # Optimize animation size by skipping frames if episode is too long
+    max_frames = 200  # Limit to 200 frames for reasonable file size
+    if len(episode_0_frames) > max_frames:
+        step = len(episode_0_frames) // max_frames
+        episode_0_frames = episode_0_frames[::step]
+        episode_0_actions = episode_0_actions[::step]
+        episode_0_states = episode_0_states[::step]
+        print(f"⚡ Optimized to {len(episode_0_frames)} frames (every {step}th frame) for better performance")
+
+    # Create the animation with smaller figure size for optimization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))  # Reduced from 15x6 to 12x5
+
+    # Main image display
+    im = ax1.imshow(episode_0_frames[0])
+    ax1.set_title('Robot Camera View - Episode 0')
+    ax1.axis('off')
+
+    # Action/state plots
+    ax2.set_title('Robot State & Action')
+    ax2.set_xlabel('Joint/Action Dimension')
+    ax2.set_ylabel('Value')
+    action_bars = ax2.bar(range(6), episode_0_actions[0][:6], alpha=0.7, label='Action', color='red')
+    state_bars = ax2.bar(range(6, 12), episode_0_states[0][:6], alpha=0.7, label='State', color='blue')
+    ax2.legend()
+    ax2.set_xticks(range(12))
+    ax2.set_xticklabels([f'A{i+1}' for i in range(6)] + [f'S{i+1}' for i in range(6)])
+
+    # Frame counter text
+    frame_text = ax1.text(0.02, 0.98, '', transform=ax1.transAxes, fontsize=12, 
+                         verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    def animate(frame_idx):
+        # Update image
+        im.set_array(episode_0_frames[frame_idx])
+        
+        # Update action/state bars
+        actions = episode_0_actions[frame_idx]
+        states = episode_0_states[frame_idx]
+        
+        for i, (bar, value) in enumerate(zip(action_bars, actions[:6])):
+            bar.set_height(value)
+        
+        for i, (bar, value) in enumerate(zip(state_bars, states[:6])):
+            bar.set_height(value)
+        
+        # Update frame counter
+        frame_text.set_text(f'Frame {frame_idx + 1}/{len(episode_0_frames)}')
+        
+        return [im] + list(action_bars) + list(state_bars) + [frame_text]
+
+    # Create animation with optimized settings
+    print("🎬 Creating optimized animation...")
+    anim = animation.FuncAnimation(fig, animate, frames=len(episode_0_frames), 
+                                  interval=150, blit=True, repeat=True)
+
+    plt.tight_layout()
+
+    # Display the animation
+    print("▶️  Displaying episode video...")
+    try:
+        display(HTML(anim.to_jshtml()))
+        print("✅ Animation displayed successfully!")
+    except Exception as e:
+        print(f"⚠️  Animation too large for inline display: {e}")
+        print("💡 Try reducing max_frames or use anim.save() to export as file")
+    finally:
+        plt.close(fig) # prevent duplicate plot
+
+    # Show some statistics about the episode
+    print(f"\n📊 Episode 0 Statistics:")
+    print(f"   Original duration: {len(episode_0_indices)} frames")
+    print(f"   Displayed duration: {len(episode_0_frames)} frames")
+    print(f"   Action range: [{np.min(episode_0_actions):.3f}, {np.max(episode_0_actions):.3f}]")
+    print(f"   State range: [{np.min(episode_0_states):.3f}, {np.max(episode_0_states):.3f}]")
+    print(f"   Task: {simple_dataset[episode_0_indices[0]]['task']}")
+
+else:
+    print("No frames found for episode 0.")
 
 
 # %% [markdown] vscode={"languageId": "raw"}
@@ -151,10 +312,11 @@ for key, value in sample.items():
 #   - input/output shapes: to properly size the policy
 #   - dataset stats: for normalization and denormalization of input/outputs
 dataset_metadata = LeRobotDatasetMetadata("bearlover365/red_cube_always_in_same_place")
-# features = dataset_to_policy_features(dataset_metadata.features)
-# output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
-# input_features = {key: ft for key, ft in features.items() if key not in output_features}
-# input_features.pop("observation.wrist_image")
+features = dataset_to_policy_features(dataset_metadata.features)
+output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+input_features = {key: ft for key, ft in features.items() if key not in output_features}
+if "observation.wrist_image" in input_features:
+    input_features.pop("observation.wrist_image")
 # Policies are initialized with a configuration class, in this case `DiffusionConfig`. For this example,
 # we'll just use the defaults and so no arguments other than input/output features need to be passed.
 cfg = ACTConfig(input_features=input_features, output_features=output_features, chunk_size= 10, n_action_steps=10)
@@ -207,23 +369,6 @@ import matplotlib.pyplot as plt
 from torchvision import transforms
 
 # Define our augmentation transform first
-class AddGaussianNoise(object):
-    """
-    Adds Gaussian noise to a tensor.
-    """
-    def __init__(self, mean=0., std=0.01):
-        self.mean = mean
-        self.std = std
-
-    def __call__(self, tensor):
-        # Adds noise: tensor remains a tensor.
-        noise = torch.randn(tensor.size()) * self.std + self.mean
-        return tensor + noise
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}(mean={self.mean}, std={self.std})"
-
-# Create a transformation pipeline that converts a PIL image to a tensor, then adds noise.
 transform = transforms.Compose([
     AddGaussianNoise(mean=0., std=0.02),
     transforms.Lambda(lambda x: x.clamp(0, 1))
@@ -236,40 +381,22 @@ transform = transforms.Compose([
 print("🔍 Getting sample data for augmentation visualization...")
 try:
     sample_data = simple_dataset[0]
-    original_image = sample_data['observation.image']
-    print(f"✅ Successfully loaded sample image with shape: {original_image.shape}")
     
-    # Apply our transform to see the difference
-    augmented_image = transform(original_image)
-    
-    # Create visualization
-    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    
-    # Original image
-    axes[0].imshow(original_image.permute(1, 2, 0))
-    axes[0].set_title("Original Image")
-    axes[0].axis('off')
-    
-    # Augmented image 
-    axes[1].imshow(augmented_image.permute(1, 2, 0))
-    axes[1].set_title("Augmented Image (with Gaussian Noise)")
-    axes[1].axis('off')
-    
-    plt.tight_layout()
-    plt.show()
-    
-    print(f"🔍 Image shape: {original_image.shape}")
-    print(f"📊 Original image stats:")
-    print(f"   Mean: {original_image.mean():.3f}")
-    print(f"   Std:  {original_image.std():.3f}")
-    print(f"   Min:  {original_image.min():.3f}")
-    print(f"   Max:  {original_image.max():.3f}")
-    
-    print(f"📊 Augmented image stats:")
-    print(f"   Mean: {augmented_image.mean():.3f}")
-    print(f"   Std:  {augmented_image.std():.3f}")
-    print(f"   Min:  {augmented_image.min():.3f}")
-    print(f"   Max:  {augmented_image.max():.3f}")
+    # Find the image key
+    image_key = None
+    for key in sample_data.keys():
+        if "image" in key and isinstance(sample_data[key], torch.Tensor):
+            image_key = key
+            break
+
+    if image_key:
+        original_image = sample_data[image_key]
+        print(f"✅ Successfully loaded sample image with shape: {original_image.shape}")
+        
+        # Apply our new utility function to see the difference
+        visualize_augmentations(original_image, transform)
+    else:
+        print("❌ Could not find an image key in the sample data.")
     
 except Exception as e:
     print(f"❌ Error loading image data: {e}")
@@ -286,13 +413,13 @@ print("✅ Transform already defined above - ready for dataset creation!")
 # We can then instantiate the dataset with these delta_timestamps configuration.
 print("🔄 Creating dataset with transforms...")
 try:
-    dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", delta_timestamps=delta_timestamps, image_transforms=transform)
+    dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", delta_timestamps=delta_timestamps, image_transforms=transform, video_backend="pyav")
     print("✅ Dataset created successfully!")
 except Exception as e:
     print(f"❌ Error creating dataset with transforms: {e}")
     print("🔄 Falling back to dataset without image transforms...")
     # Fall back to dataset without image transforms if there are PIL issues
-    dataset = LeRobotDataset("omy_pnp", delta_timestamps=delta_timestamps, root='./demo_data')
+    dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", delta_timestamps=delta_timestamps, video_backend="pyav")
     print("✅ Dataset created without image transforms (training will still work)")
 
 # Then we create our optimizer and dataloader for offline training.
@@ -323,7 +450,7 @@ try:
     print("✅ Batch loaded successfully!")
     
     print("🎯 Batch Structure (what the model receives):")
-    print(f"   Batch size: {batch['observation.image'].shape[0]}")
+    print(f"   Batch size: {batch['observation.images.front'].shape[0]}")
     print()
     
     for key, value in batch.items():
@@ -382,75 +509,7 @@ except Exception as e:
 # The trained checkpoint will be saved in './ckpt/act_y' folder.
 
 # %%
-import time
-from collections import deque
-
-# Enhanced training loop with timing and analytics
-step = 0
-done = False
-start_time = time.time()
-loss_history = deque(maxlen=100)  # Keep track of recent losses
-best_loss = float('inf')
-
-print(f"🚀 Starting training for {training_steps} steps...")
-print(f"📊 Logging every {log_freq} steps")
-print("=" * 80)
-
-while not done:
-    for batch in dataloader:
-        # Move batch to device
-        inp_batch = {k: (v.to(device) if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
-        
-        # Forward pass
-        loss, _ = policy.forward(inp_batch)
-        
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
-        
-        # Track loss
-        current_loss = loss.item()
-        loss_history.append(current_loss)
-        if current_loss < best_loss:
-            best_loss = current_loss
-
-        # Logging and progress tracking
-        if step % log_freq == 0:
-            elapsed_time = time.time() - start_time
-            steps_per_second = (step + 1) / elapsed_time if elapsed_time > 0 else 0
-            remaining_steps = training_steps - step
-            eta_seconds = remaining_steps / steps_per_second if steps_per_second > 0 else 0
-            eta_minutes = eta_seconds / 60
-            
-            # Calculate average loss over recent steps
-            avg_recent_loss = sum(loss_history) / len(loss_history) if loss_history else current_loss
-            
-            print(f"🔥 Step {step:4d}/{training_steps} | "
-                  f"Loss: {current_loss:.3f} | "
-                  f"Avg: {avg_recent_loss:.3f} | "
-                  f"Best: {best_loss:.3f} | "
-                  f"Speed: {steps_per_second:.1f} steps/s | "
-                  f"ETA: {eta_minutes:.1f}m")
-            
-            # Check for potential overfitting warning
-            if step > 500 and len(loss_history) == 100:
-                recent_improvement = loss_history[0] - loss_history[-1]
-                if recent_improvement < 0.001:  # Very little improvement
-                    print("⚠️  Warning: Loss plateaued - possible overfitting with single demo!")
-
-        step += 1
-        if step >= training_steps:
-            done = True
-            break
-
-total_time = time.time() - start_time
-print("=" * 80)
-print(f"✅ Training completed!")
-print(f"⏱️  Total time: {total_time/60:.1f} minutes")
-print(f"🎯 Final loss: {current_loss:.3f}")
-print(f"🏆 Best loss: {best_loss:.3f}")
-print(f"⚡ Average speed: {training_steps/total_time:.1f} steps/second")
+train_model(policy, dataloader, optimizer, training_steps, log_freq, device)
 
 
 # %%
@@ -506,7 +565,7 @@ try:
         action = policy.select_action(inp_batch)
         actions.append(action)
         gt_actions.append(inp_batch["action"][:,0,:])
-        images.append(inp_batch["observation.image"])
+        images.append(inp_batch["observation.images.front"])
         
         # Show progress for long episodes
         if i % 50 == 0:
@@ -529,8 +588,9 @@ try:
     joint_names = ['Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Gripper']
     print(f"\n🔧 Per-joint errors:")
     for i, joint_name in enumerate(joint_names):
-        joint_error = torch.mean(torch.abs(actions[:, i] - gt_actions[:, i])).item()
-        print(f"   {joint_name}: {joint_error:.4f}")
+        if i < actions.shape[1]:
+            joint_error = torch.mean(torch.abs(actions[:, i] - gt_actions[:, i])).item()
+            print(f"   {joint_name}: {joint_error:.4f}")
     
     print(f"\n💡 Interpretation:")
     if mean_abs_error < 0.01:
@@ -543,15 +603,15 @@ try:
 
 except Exception as e:
     print(f"❌ Error during inference evaluation: {e}")
-    print("⚠️  This is likely due to PIL version compatibility issues.")
+    print("⚠️  This is likely due to key mismatch or other compatibility issues.")
     print("💡 Your model was still trained successfully! The evaluation step is optional.")
 
 # %%
 # 📈 Visualize Predicted vs Ground Truth Actions
 import matplotlib.pyplot as plt
 
-action_dim = 7
-joint_names = ['Joint 1', 'Joint 2', 'Joint 3', 'Joint 4', 'Joint 5', 'Joint 6', 'Gripper']
+action_dim = actions.shape[1]
+joint_names = [f'Joint {i+1}' for i in range(action_dim-1)] + ['Gripper']
 
 # Create subplots for each joint
 fig, axes = plt.subplots(action_dim, 1, figsize=(15, 3*action_dim))
