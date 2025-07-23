@@ -453,7 +453,7 @@ def visualize_sample(dataset: LeRobotDataset, index: int, save_path: str = None)
             plt.axis('off')
             
             if save_path is None:
-                save_path = f"sample_{index}_visualization.png"
+                save_path = f"data/plots/sample_{index}_visualization.png"
             plt.savefig(save_path, dpi=100, bbox_inches='tight')
             plt.close()
             print(f"💾 Saved sample visualization to {save_path}")

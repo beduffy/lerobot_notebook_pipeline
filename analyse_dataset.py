@@ -69,7 +69,7 @@ def main():
                        help="Fraction of data to sample for faster analysis (0.1 = 10%%, default: 1.0)")
     parser.add_argument("--skip-animation", action="store_true",
                        help="Skip animation creation for faster execution")
-    parser.add_argument("--output-dir", type=str, default=".",
+    parser.add_argument("--output-dir", type=str, default="data/plots",
                        help="Directory to save analysis plots (default: current directory)")
     
     args = parser.parse_args()

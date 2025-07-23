@@ -52,7 +52,7 @@ def visualize_augmentations(sample_image: torch.Tensor, transform: transforms.Co
     
     # Save plot instead of showing
     if save_path is None:
-        save_path = "augmentation_comparison.png"
+        save_path = "data/plots/augmentation_comparison.png"
     plt.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close()
     print(f"💾 Saved augmentation comparison to {save_path}")
@@ -89,7 +89,7 @@ def plot_action_histogram(dataset: LeRobotDataset, action_dim: int, save_path: s
     
     # Save plot instead of showing
     if save_path is None:
-        save_path = f"action_histogram_dim_{action_dim}.png"
+        save_path = f"data/plots/action_histogram_dim_{action_dim}.png"
     plt.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close()
     print(f"💾 Saved action histogram to {save_path}")
@@ -190,7 +190,7 @@ def plot_all_action_histograms(dataset: LeRobotDataset, sample_ratio: float = 1.
     print("   💾 Saving plot...")
     save_start = time.time()
     if save_path is None:
-        save_path = "all_action_histograms.png"
+        save_path = "data/plots/all_action_histograms.png"
     plt.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close()
     save_time = time.time() - save_start
@@ -298,7 +298,7 @@ def visualize_episode_trajectory(dataset: LeRobotDataset, episode_idx: int = 0, 
     print("   💾 Saving plot...")
     save_start = time.time()
     if save_path is None:
-        save_path = f"episode_{episode_idx}_trajectory.png"
+        save_path = f"data/plots/episode_{episode_idx}_trajectory.png"
     plt.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close()
     save_time = time.time() - save_start
@@ -440,7 +440,7 @@ def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max
     print("   💾 Saving animation...")
     save_start = time.time()
     if save_path is None:
-        save_path = f"episode_{episode_idx}_animation_optimized.png"
+        save_path = f"data/plots/episode_{episode_idx}_animation_optimized.png"
     plt.savefig(save_path, dpi=80, bbox_inches='tight')  # Lower DPI for speed
     plt.close()
     save_time = time.time() - save_start
@@ -505,7 +505,7 @@ def compare_augmentation_effects(dataset: LeRobotDataset, transforms_list: list,
     
     # Save plot instead of showing
     if save_path is None:
-        save_path = "augmentation_effects_comparison.png"
+        save_path = "data/plots/augmentation_effects_comparison.png"
     plt.savefig(save_path, dpi=100, bbox_inches='tight')
     plt.close()
     print(f"💾 Saved augmentation comparison to {save_path}") 

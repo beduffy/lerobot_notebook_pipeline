@@ -3,7 +3,9 @@ import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
 from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise, visualize_augmentations, plot_action_histogram
+
 
 @pytest.fixture
 def sample_image():
@@ -16,6 +18,7 @@ def simple_dataset():
     """A pytest fixture to provide a simple LeRobotDataset for testing."""
     # Using a real but small dataset from the hub for realistic testing
     return LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+
 
 def test_visualize_augmentations(sample_image):
     """
