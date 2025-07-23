@@ -126,10 +126,12 @@ try bbox affordances
 
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository to **understand generalization in robots** through systematic experimentation.
 
-## 🎯 Current Status (July 2024)
+## 🎯 Current Status (January 2025)
 ✅ **FOUNDATION COMPLETE**: Non-interactive pipeline with optimized performance  
 ✅ **Infrastructure**: Fast tests (~32s), automated plotting, organized output  
 ✅ **Tools Ready**: `analyse_dataset.py`, `demo_visualizations.py`, `train.py`  
+✅ **SINGLE EPISODE TRAINING**: Working transparently with full visibility  
+✅ **CLOUD READY**: Optimized scripts for GPU training and HuggingFace upload  
 
 ## 🧠 Core Research Questions (Your North Star)
 

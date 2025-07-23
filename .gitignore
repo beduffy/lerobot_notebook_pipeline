@@ -36,3 +36,4 @@ meta/
 videos/
 data_collection_logs/
 single_episode_experiments/
+single_episode_model/
