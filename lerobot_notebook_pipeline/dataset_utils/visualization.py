@@ -11,7 +11,7 @@ class AddGaussianNoise:
     """
     Adds Gaussian noise to a tensor.
     """
-    def __init__(self, mean=0., std=0.01):
+    def __init__(self, mean=0., std=0.005):
         self.mean = mean
         self.std = std
 
@@ -135,7 +135,7 @@ def plot_all_action_histograms(dataset: LeRobotDataset, sample_ratio: float = 1.
     for i, idx in enumerate(indices):
         if i % max(1, len(indices) // 10) == 0:  # Progress every 10%
             print(f"      Loading: {i}/{len(indices)} ({i/len(indices)*100:.1f}%)")
-        all_actions.append(dataset[idx]["action"].numpy())
+        all_actions.append(dataset[int(idx)]["action"].numpy())
     
     all_actions = np.array(all_actions)
     load_time = time.time() - load_start

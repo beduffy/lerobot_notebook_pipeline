@@ -247,7 +247,7 @@ def analyze_action_patterns(dataset: LeRobotDataset, sample_ratio: float = 1.0, 
     for i, idx in enumerate(indices):
         if i % max(1, len(indices) // 10) == 0:  # Progress every 10%
             print(f"      Loading actions: {i}/{len(indices)} ({i/len(indices)*100:.1f}%)")
-        action = dataset[idx]['action'].numpy()
+        action = dataset[int(idx)]['action'].numpy()
         all_actions.append(action)
     
     all_actions = np.array(all_actions)

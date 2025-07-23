@@ -187,7 +187,7 @@ visualize_sample(simple_dataset, 0)
 # %% [markdown]
 # ### 🔍 Quick Dataset Overview
 #
-# For comprehensive dataset analysis, use: `python analyse_dataset.py --dataset "bearlover365/red_cube_always_in_same_place"`
+# For comprehensive dataset analysis, use: `python analyse_dataset.py "bearlover365/red_cube_always_in_same_place"`
 # For visualization demos, use: `python demo_visualizations.py --dataset "bearlover365/red_cube_always_in_same_place"`
 
 # %%

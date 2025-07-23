@@ -33,5 +33,6 @@ data/
 
 # TODO but maybe the below two shouldn't even be tere
 meta/
-
 videos/
+data_collection_logs/
+single_episode_experiments/

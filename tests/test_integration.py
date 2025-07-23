@@ -52,10 +52,10 @@ def test_analysis_functions(working_dataset):
     assert 'num_steps' in stats
     assert 'num_episodes' in stats
     
-    # Test episode analysis
+    # Test episode analysis (returns dict with episode indices as keys)
     episode_stats = analyze_episodes(working_dataset)
     assert len(episode_stats) == working_dataset.num_episodes
-    assert all('length' in ep for ep in episode_stats)
+    assert all(isinstance(ep_data, dict) and 'length' in ep_data for ep_data in episode_stats.values())
     
     print(f"✅ Analysis functions work correctly")
 
@@ -67,8 +67,7 @@ def test_visualization_functions(working_dataset, tmp_path):
     plot_all_action_histograms(
         working_dataset, 
         sample_ratio=0.1,  # Fast test
-        save_path=str(save_path),
-        title="Test Histograms"
+        save_path=str(save_path)
     )
     
     assert save_path.exists(), "Plot file should be created"
