@@ -94,7 +94,7 @@ def run_single_episode_experiment(dataset_path: str, episode_idx: int, augmentat
     
     # Load dataset
     print("📊 Loading dataset...")
-    dataset = LeRobotDataset(dataset_path, video_backend="opencv")
+    dataset = LeRobotDataset(dataset_path, video_backend="pyav")
     
     # Extract episode info
     from_idx, to_idx, episode_length = extract_single_episode_dataset(dataset, episode_idx, experiment_dir)
@@ -171,7 +171,7 @@ def compare_all_episodes(dataset_path: str, output_dir: Path, max_episodes: int 
     print("=" * 60)
     
     # Load dataset to check number of episodes
-    dataset = LeRobotDataset(dataset_path, video_backend="opencv")
+    dataset = LeRobotDataset(dataset_path, video_backend="pyav")
     num_episodes = len(dataset.meta.episodes)
     episodes_to_test = min(num_episodes, max_episodes)
     
