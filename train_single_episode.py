@@ -408,8 +408,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size (auto if not set)")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--output-dir", default="./single_episode_model", help="Save directory")
-    parser.add_argument("--video-backend", choices=["pyav", "opencv"], default=None, 
-                       help="Video backend (auto if not set)")
+    parser.add_argument("--video-backend", choices=["pyav"], default=None, 
+                       help="Video backend (auto-detected)")
     
     # Cloud/advanced options
     parser.add_argument("--cloud", action="store_true", help="Enable cloud optimizations")
@@ -428,7 +428,8 @@ def main():
         args.batch_size = 32 if (args.cloud or torch.cuda.is_available()) else 8
     
     if args.video_backend is None:
-        args.video_backend = "opencv" if (args.cloud or torch.cuda.is_available()) else "pyav"
+        # Always use pyav for now - opencv support varies by installation
+        args.video_backend = "pyav"
     
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
