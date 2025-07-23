@@ -50,7 +50,9 @@ how many positions do you need between? how do NNs interpolate?
     - will eval still work now after weeks?
         - How to make eval running setup from 1 bedroom to next easier? Buy powered USB hub?
         - Could I move table? how robust are we? How to make robustness/generalisation? That’s my biggest issue, everyone’s biggest issue with these methods… Short answer is put it into the data
-            - Why does my intuition sayobust to table moving? just because it is 1 cube?
+            - Why does my intuition say it will be robust to table moving? just because it is 1 cube?
+search how Ville or others did interpretability https://github.com/villekuosmanen/physical-AI-interpretability and https://villekuosmanen.medium.com/opening-the-black-box-of-robot-ai-983ab2754eec
+try bbox affordances
 
 
 # new doc
