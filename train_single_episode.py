@@ -20,6 +20,9 @@ import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
+from lerobot.common.datasets.sampler import EpisodeAwareSampler
+from lerobot.common.datasets.utils import cycle
+from torch.amp import GradScaler
 import time
 import os
 import warnings
@@ -96,8 +99,8 @@ def create_single_episode_dataset(dataset_name: str, episode_idx: int, video_bac
 
 
 def setup_policy_and_config(metadata):
-    """Setup ACT policy with transparent configuration."""
-    print(f"\n🧠 Setting up ACT policy...")
+    """Setup ACT policy with PROPER LeRobot configuration."""
+    print(f"\n🧠 Setting up ACT policy with LeRobot defaults...")
     
     # Convert dataset features to policy features
     features = dataset_to_policy_features(metadata.features)
@@ -111,18 +114,40 @@ def setup_policy_and_config(metadata):
     print(f"   Input features: {list(input_features.keys())}")
     print(f"   Output features: {list(output_features.keys())}")
     
-    # Create ACT configuration
+    # Create ACT configuration with PROPER LeRobot defaults
     cfg = ACTConfig(
         input_features=input_features, 
-        output_features=output_features, 
-        chunk_size=10,
-        n_action_steps=10
+        output_features=output_features,
+        # Use LeRobot ACT defaults from lerobot_act_config.py
+        chunk_size=100,           # Default: 100 (not 10!)
+        n_action_steps=100,       # Default: 100 (not 10!)
+        dim_model=512,           # Default: 512
+        n_heads=8,               # Default: 8
+        dim_feedforward=3200,    # Default: 3200
+        n_encoder_layers=4,      # Default: 4
+        n_decoder_layers=1,      # Default: 1 (ACT bug fix)
+        vision_backbone="resnet18",  # Default: resnet18
+        pretrained_backbone_weights="ResNet18_Weights.IMAGENET1K_V1",
+        use_vae=True,            # Default: True
+        latent_dim=32,           # Default: 32
+        n_vae_encoder_layers=4,  # Default: 4
+        dropout=0.1,             # Default: 0.1
+        kl_weight=10.0,          # Default: 10.0
+        # Optimizer presets from config
+        optimizer_lr=1e-5,       # Default: 1e-5 (not 1e-4!)
+        optimizer_weight_decay=1e-4,  # Default: 1e-4
+        optimizer_lr_backbone=1e-5,   # Default: 1e-5
     )
     
+    print(f"   🎯 Using LeRobot ACT defaults:")
     print(f"   Chunk size: {cfg.chunk_size} (predicts {cfg.chunk_size} future actions)")
+    print(f"   Action steps: {cfg.n_action_steps}")
     print(f"   Hidden dim: {cfg.dim_model}")
     print(f"   Encoder layers: {cfg.n_encoder_layers}")
     print(f"   Decoder layers: {cfg.n_decoder_layers}")
+    print(f"   Vision backbone: {cfg.vision_backbone}")
+    print(f"   VAE enabled: {cfg.use_vae}")
+    print(f"   Learning rate: {cfg.optimizer_lr}")
     
     # Resolve delta timestamps for action chunking
     delta_timestamps = resolve_delta_timestamps(cfg, metadata)
@@ -177,12 +202,18 @@ def create_dataloader(full_dataset, single_episode_indices, delta_timestamps, ba
     return dataloader
 
 
-def train_single_episode(policy, dataloader, num_steps, device, learning_rate=1e-4, 
+def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_rate=None, 
                         log_every=None, cloud_mode=False):
-    """Train policy on single episode with environment-appropriate logging."""
-    print(f"\n🚀 Starting training on single episode...")
+    """Train policy on single episode with OPTIMIZED training loop like LeRobot."""
+    print(f"\n🚀 Starting OPTIMIZED training with LeRobot config...")
+    
+    # Use ACT config learning rate if not specified
+    if learning_rate is None:
+        learning_rate = cfg.optimizer_lr
+    
     print(f"   Training steps: {num_steps}")
-    print(f"   Learning rate: {learning_rate}")
+    print(f"   Learning rate: {learning_rate} (from ACT config: {cfg.optimizer_lr})")
+    print(f"   Weight decay: {cfg.optimizer_weight_decay}")
     print(f"   Device: {device}")
     print(f"   Mode: {'Cloud' if cloud_mode else 'Local'}")
     
@@ -193,46 +224,81 @@ def train_single_episode(policy, dataloader, num_steps, device, learning_rate=1e
         else:
             log_every = 50   # More frequent for local/short runs
     
-    # Setup training
+    # Setup training - OPTIMIZED like LeRobot with proper config
     policy.to(device)
     policy.train()
-    optimizer = torch.optim.Adam(policy.parameters(), lr=learning_rate)
+    
+    # PROPER OPTIMIZER: Use ACT config presets (AdamW with weight decay)
+    optimizer = torch.optim.AdamW(
+        policy.parameters(), 
+        lr=learning_rate,
+        weight_decay=cfg.optimizer_weight_decay
+    )
+    
+    # OPTIMIZATION 1: Mixed precision training
+    grad_scaler = GradScaler(device.type, enabled=device.type == "cuda")
+    
+    # OPTIMIZATION 2: Learning rate scheduler (use config preset if available)
+    lr_scheduler_preset = cfg.get_scheduler_preset()
+    if lr_scheduler_preset is None:
+        # Fallback to cosine if no preset
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
+    else:
+        # Use proper scheduler from config
+        lr_scheduler = None  # Will be set by LeRobot factory if needed
+    
+    # OPTIMIZATION 3: Cycle through dataloader efficiently
+    dl_iter = cycle(dataloader)
     
     # Training metrics
     losses = []
     step_times = []
+    data_loading_times = []
     
     # Training loop
     start_time = time.time()
-    dataloader_iter = iter(dataloader)
+    
+    # OPTIMIZATION 4: CUDA performance settings
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
     
     for step in range(num_steps):
         step_start = time.time()
         
-        # Get batch (cycle through episode data)
-        try:
-            batch = next(dataloader_iter)
-        except StopIteration:
-            dataloader_iter = iter(dataloader)
-            batch = next(dataloader_iter)
+        # OPTIMIZATION 5: Efficient data loading with timing
+        data_start = time.time()
+        batch = next(dl_iter)
+        data_time = time.time() - data_start
+        data_loading_times.append(data_time)
         
-        # Move to device
+        # Move to device efficiently
         for key in batch:
             if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device, non_blocking=torch.cuda.is_available())
+                batch[key] = batch[key].to(device, non_blocking=True)
         
-        # Forward pass
-        loss, output_dict = policy.forward(batch)
+        # OPTIMIZATION 6: Mixed precision forward pass
+        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+            loss, output_dict = policy.forward(batch)
         
-        # Backward pass
+        # OPTIMIZATION 7: Scaled backward pass
+        grad_scaler.scale(loss).backward()
+        
+        # OPTIMIZATION 8: Unscale before gradient clipping (LeRobot style)
+        grad_scaler.unscale_(optimizer)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            policy.parameters(), 
+            max_norm=1.0,  # Use default grad clip norm
+            error_if_nonfinite=False
+        )
+        
+        # OPTIMIZATION 9: Scaled optimizer step
+        grad_scaler.step(optimizer)
+        grad_scaler.update()
         optimizer.zero_grad()
-        loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
-        
-        # Update
-        optimizer.step()
+        # OPTIMIZATION 10: Step scheduler
+        lr_scheduler.step()
         
         # Record metrics
         loss_value = loss.item()
@@ -240,19 +306,25 @@ def train_single_episode(policy, dataloader, num_steps, device, learning_rate=1e
         step_time = time.time() - step_start
         step_times.append(step_time)
         
-        # Logging
+        # Logging with additional metrics
         if step % log_every == 0 or step == num_steps - 1:
             elapsed = time.time() - start_time
             steps_per_sec = (step + 1) / elapsed if elapsed > 0 else 0
             eta_min = (num_steps - step - 1) / steps_per_sec / 60 if steps_per_sec > 0 else 0
             
+            # Calculate additional metrics
+            avg_data_time = np.mean(data_loading_times[-log_every:]) * 1000  # ms
+            current_lr = optimizer.param_groups[0]["lr"]
+            
             if cloud_mode:
-                # Compact logging for cloud
+                # Compact logging for cloud with key metrics
                 avg_loss = np.mean(losses[-min(50, len(losses)):])
                 print(f"   Step {step:4d}/{num_steps} | "
                       f"Loss: {loss_value:.4f} | "
                       f"Avg: {avg_loss:.4f} | "
                       f"{steps_per_sec:.1f} steps/s | "
+                      f"Data: {avg_data_time:.1f}ms | "
+                      f"LR: {current_lr:.1e} | "
                       f"ETA: {eta_min:.1f}min")
             else:
                 # Detailed logging for local
@@ -262,15 +334,21 @@ def train_single_episode(policy, dataloader, num_steps, device, learning_rate=1e
                       f"Loss: {loss_value:.6f} | "
                       f"Avg Loss: {avg_loss:.6f} | "
                       f"Time/step: {avg_time:.3f}s | "
+                      f"Data: {avg_data_time:.1f}ms | "
+                      f"GradNorm: {grad_norm:.3f} | "
+                      f"LR: {current_lr:.1e} | "
                       f"ETA: {eta_min:.1f}min")
     
     total_time = time.time() - start_time
     final_steps_per_sec = num_steps / total_time if total_time > 0 else 0
+    avg_data_loading = np.mean(data_loading_times) * 1000
     
-    print(f"\n✅ Training completed!")
+    print(f"\n✅ OPTIMIZED Training completed!")
     print(f"   Total time: {total_time/60:.2f} minutes")
     print(f"   Speed: {final_steps_per_sec:.1f} steps/second")
+    print(f"   Data loading: {avg_data_loading:.1f}ms/step average")
     print(f"   Final loss: {losses[-1]:.6f}")
+    print(f"   Final LR: {optimizer.param_groups[0]['lr']:.1e}")
     print(f"   Average loss (last 100 steps): {np.mean(losses[-100:]):.6f}")
     
     return losses
@@ -406,7 +484,7 @@ def main():
     parser.add_argument("--episode", type=int, default=0, help="Episode index to train on")
     parser.add_argument("--steps", type=int, default=1000, help="Training steps")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size (auto if not set)")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate (LeRobot ACT default: 1e-5)")
     parser.add_argument("--output-dir", default="./single_episode_model", help="Save directory")
     parser.add_argument("--video-backend", choices=["pyav"], default=None, 
                        help="Video backend (auto-detected)")
@@ -481,8 +559,8 @@ def main():
         
         # 4. Train
         losses = train_single_episode(
-            policy, dataloader, args.steps, device, args.lr, 
-            cloud_mode=args.cloud
+            policy, dataloader, args.steps, device, cfg, 
+            learning_rate=args.lr, cloud_mode=args.cloud
         )
         
         # Log to wandb
