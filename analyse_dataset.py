@@ -1,143 +1,177 @@
 #!/usr/bin/env python3
 """
-Dataset Analysis Script
+Comprehensive dataset analysis script.
 
-This script provides comprehensive analysis of LeRobot datasets including:
-- Basic statistics and metadata
-- Episode-by-episode analysis  
-- Action pattern analysis
+This script provides detailed analysis of robot demonstration datasets including:
+- Basic dataset statistics
+- Episode-by-episode analysis
+- Action pattern analysis with timing breakdowns
+- Visualization capabilities
 - Overfitting risk assessment
-- Visualization of trajectories and distributions
 
 Usage:
-    python analyse_dataset.py --dataset "bearlover365/red_cube_always_in_same_place"
-    python analyse_dataset.py --dataset "my_dataset" --root "./data"
+    python analyse_dataset.py <dataset_path> [options]
+    python analyse_dataset.py --help
+
+Performance Options:
+    --fast              Use 10%% data sampling for faster analysis
+    --sample-ratio 0.2  Use 20%% data sampling (custom ratio)
+    --skip-animation    Skip animation creation for faster execution
+    --output-dir        Directory to save plots (default: current directory)
+
+Examples:
+    # Quick analysis with 10%% sampling
+    python analyse_dataset.py /path/to/dataset --fast
+    
+    # Custom sampling ratio
+    python analyse_dataset.py /path/to/dataset --sample-ratio 0.15
+    
+    # Full analysis with custom output directory  
+    python analyse_dataset.py /path/to/dataset --output-dir ./analysis_results
 """
 
 import argparse
 import sys
-import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+import os
+from pathlib import Path
 
-# Import our utility functions
-from lerobot_notebook_pipeline.dataset_utils.analysis import (
-    get_dataset_stats, analyze_episodes, compare_episodes, 
-    analyze_action_patterns, analyze_overfitting_risk, visualize_sample
-)
-from lerobot_notebook_pipeline.dataset_utils.visualization import (
-    plot_all_action_histograms, visualize_episode_trajectory, 
-    create_training_animation
-)
+try:
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot_notebook_pipeline.dataset_utils.analysis import (
+        get_dataset_stats, analyze_episodes, analyze_overfitting_risk, 
+        analyze_action_patterns, visualize_sample
+    )
+    from lerobot_notebook_pipeline.dataset_utils.visualization import (
+        plot_all_action_histograms, visualize_episode_trajectory, 
+        create_training_animation
+    )
+    from lerobot_notebook_pipeline.dataset_utils.analysis import compare_episodes
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Make sure you have installed the lerobot package and this project package.")
+    print("Run: pip install -e . (from the project root)")
+    sys.exit(1)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Analyze LeRobot dataset')
-    parser.add_argument('--dataset', type=str, required=True,
-                       help='Dataset name or path')
-    parser.add_argument('--root', type=str, default=None,
-                       help='Root directory for local datasets')
-    parser.add_argument('--episodes', type=int, nargs='+', default=[0, 1, 2],
-                       help='Episode indices to analyze in detail')
-    parser.add_argument('--sample-idx', type=int, default=0,
-                       help='Sample index to visualize')
-    parser.add_argument('--skip-animation', action='store_true',
-                       help='Skip creating episode animations')
-    parser.add_argument('--video-backend', type=str, default='pyav',
-                       help='Video backend to use (pyav or cv2)')
+    parser = argparse.ArgumentParser(description="Comprehensive analysis of robot demonstration datasets")
+    parser.add_argument("dataset_path", help="Path to the dataset")
+    parser.add_argument("--root", default=".", help="Root directory for datasets (default: current dir)")
+    parser.add_argument("--episodes", nargs="+", type=int, default=[0, 1, 2], 
+                       help="Episode indices to analyze in detail (default: 0 1 2)")
+    parser.add_argument("--sample-idx", type=int, default=0, 
+                       help="Sample index for detailed visualization (default: 0)")
+    parser.add_argument("--video-backend", default="opencv", 
+                       help="Video backend for dataset loading (default: opencv)")
+    parser.add_argument("--fast", action="store_true",
+                       help="Enable fast mode with 10%% data sampling for quicker analysis")
+    parser.add_argument("--sample-ratio", type=float, default=1.0,
+                       help="Fraction of data to sample for faster analysis (0.1 = 10%%, default: 1.0)")
+    parser.add_argument("--skip-animation", action="store_true",
+                       help="Skip animation creation for faster execution")
+    parser.add_argument("--output-dir", type=str, default=".",
+                       help="Directory to save analysis plots (default: current directory)")
     
     args = parser.parse_args()
     
-    print("🔍 LeRobot Dataset Analysis Tool")
-    print("=" * 50)
-    print(f"Dataset: {args.dataset}")
-    if args.root:
-        print(f"Root: {args.root}")
-    print()
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     try:
-        # Load dataset
-        print("📦 Loading dataset...")
-        if args.root:
-            dataset = LeRobotDataset(args.dataset, root=args.root, video_backend=args.video_backend)
-        else:
-            dataset = LeRobotDataset(args.dataset, video_backend=args.video_backend)
-        print("✅ Dataset loaded successfully!")
+        print("🤖 LeRobot Dataset Analysis Tool")
+        print("=" * 50)
+        print(f"📁 Dataset: {args.dataset_path}")
+        print(f"📁 Root: {args.root}")
+        print(f"💾 Output directory: {output_dir.absolute()}")
+        print(f"🎬 Video backend: {args.video_backend}")
         print()
-        
+
+        # Load dataset
+        print("📊 Loading dataset...")
+        dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
+        print(f"✅ Dataset loaded: {len(dataset)} samples")
+        print()
+
         # 1. Basic Statistics
-        print("📊 BASIC DATASET STATISTICS")
+        print("📈 BASIC DATASET STATISTICS")
         print("-" * 30)
         stats = get_dataset_stats(dataset)
-        for key, value in stats.items():
-            if key != "dataset_stats":
-                print(f"  {key}: {value}")
-        print()
-        
-        # 2. Normalization Statistics
-        print("📈 NORMALIZATION STATISTICS")
-        print("-" * 30)
-        for key, stat_dict in stats["dataset_stats"].items():
-            print(f"  {key}:")
-            if 'mean' in stat_dict:
+        for key, stat_dict in stats.items():
+            if isinstance(stat_dict, dict) and 'mean' in stat_dict:
+                print(f"📊 {key}:")
                 print(f"    mean: {stat_dict['mean']}")
                 print(f"    std:  {stat_dict['std']}")
-            if 'min' in stat_dict:
                 print(f"    min:  {stat_dict['min']}")
                 print(f"    max:  {stat_dict['max']}")
             print()
         
-        # 3. Episode Analysis
+        # 2. Episode Analysis
         print("🔍 EPISODE-BY-EPISODE ANALYSIS")
         print("-" * 30)
         episode_analysis = analyze_episodes(dataset)
         print()
         
-        # 4. Overfitting Risk Assessment
+        # 3. Overfitting Risk Assessment
         print("⚠️  OVERFITTING RISK ASSESSMENT")
         print("-" * 30)
         analyze_overfitting_risk(dataset)
         print()
         
-        # 5. Action Pattern Analysis
+        # Determine sampling ratio
+        sample_ratio = args.sample_ratio
+        if args.fast:
+            sample_ratio = 0.1
+            print("🚀 Fast mode enabled - using 10% data sampling for quicker analysis")
+        elif sample_ratio < 1.0:
+            print(f"🎲 Using {sample_ratio*100:.1f}% data sampling")
+        
+        # 4. Action Pattern Analysis
         print("🎯 ACTION PATTERN ANALYSIS")
         print("-" * 30)
-        analyze_action_patterns(dataset)
+        analyze_action_patterns(dataset, sample_ratio=sample_ratio, 
+                              save_path_prefix=str(output_dir / "action_patterns"))
         print()
         
-        # 6. Action Histograms
+        # 5. Action Histograms
         print("📊 ACTION DISTRIBUTIONS")
         print("-" * 30)
-        plot_all_action_histograms(dataset)
+        plot_all_action_histograms(dataset, sample_ratio=sample_ratio,
+                                  save_path=str(output_dir / "all_action_histograms.png"))
         print()
         
-        # 7. Episode Comparison
+        # 6. Episode Comparison
         available_episodes = list(range(len(dataset.meta.episodes)))
         episodes_to_compare = [ep for ep in args.episodes if ep in available_episodes]
         
         if len(episodes_to_compare) > 1:
             print(f"📈 EPISODE COMPARISON ({episodes_to_compare})")
             print("-" * 30)
-            compare_episodes(dataset, episodes_to_compare)
+            compare_episodes(dataset, episodes_to_compare, 
+                           save_path=str(output_dir / "episode_comparison.png"))
             print()
         
-        # 8. Detailed Episode Visualization
+        # 7. Detailed Episode Visualization
         for ep_idx in episodes_to_compare[:2]:  # Only first 2 to avoid too many plots
             print(f"🎯 EPISODE {ep_idx} DETAILED ANALYSIS")
             print("-" * 30)
-            visualize_episode_trajectory(dataset, ep_idx)
+            visualize_episode_trajectory(dataset, ep_idx,
+                                       save_path=str(output_dir / f"episode_{ep_idx}_trajectory.png"))
             print()
             
             if not args.skip_animation:
-                create_training_animation(dataset, ep_idx)
+                create_training_animation(dataset, ep_idx,
+                                        save_path=str(output_dir / f"episode_{ep_idx}_animation.png"))
                 print()
         
-        # 9. Sample Visualization
+        # 8. Sample Visualization
         print(f"🖼️  SAMPLE VISUALIZATION (Index {args.sample_idx})")
         print("-" * 30)
-        visualize_sample(dataset, args.sample_idx)
+        visualize_sample(dataset, args.sample_idx,
+                        save_path=str(output_dir / f"sample_{args.sample_idx}_visualization.png"))
         print()
         
-        # 10. Summary and Recommendations
+        # 9. Summary and Recommendations
         print("💡 ANALYSIS SUMMARY & RECOMMENDATIONS")
         print("-" * 30)
         
@@ -164,7 +198,7 @@ def main():
         print("   💡 Use data augmentation to increase effective dataset size")
         print("   💡 Consider early stopping to prevent overfitting")
         
-        print(f"\n🎉 Analysis complete! Check the plots above for detailed insights.")
+        print(f"\n🎉 Analysis complete! All plots saved to: {output_dir.absolute()}")
         
     except Exception as e:
         print(f"❌ Error analyzing dataset: {e}")

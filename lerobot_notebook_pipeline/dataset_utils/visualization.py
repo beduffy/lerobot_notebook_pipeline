@@ -3,6 +3,7 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import os
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 
@@ -23,13 +24,14 @@ class AddGaussianNoise:
         return f"{self.__class__.__name__}(mean={self.mean}, std={self.std})"
 
 
-def visualize_augmentations(sample_image: torch.Tensor, transform: transforms.Compose):
+def visualize_augmentations(sample_image: torch.Tensor, transform: transforms.Compose, save_path: str = None):
     """
     Visualizes the effect of a transform on a sample image.
 
     Args:
         sample_image: A torch.Tensor representing the original image.
         transform: A torchvision.transforms.Compose object.
+        save_path: Path to save the plot. If None, uses default naming.
     """
     augmented_image = transform(sample_image)
 
@@ -47,7 +49,13 @@ def visualize_augmentations(sample_image: torch.Tensor, transform: transforms.Co
     axes[1].axis('off')
 
     plt.tight_layout()
-    plt.show()
+    
+    # Save plot instead of showing
+    if save_path is None:
+        save_path = "augmentation_comparison.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    print(f"💾 Saved augmentation comparison to {save_path}")
 
     print(f"🔍 Image shape: {sample_image.shape}")
     print(f"📊 Original image stats:")
@@ -63,13 +71,14 @@ def visualize_augmentations(sample_image: torch.Tensor, transform: transforms.Co
     print(f"   Max:  {augmented_image.max():.3f}") 
 
 
-def plot_action_histogram(dataset: LeRobotDataset, action_dim: int):
+def plot_action_histogram(dataset: LeRobotDataset, action_dim: int, save_path: str = None):
     """
     Plots a histogram of the action values for a specific dimension.
 
     Args:
         dataset: A LeRobotDataset instance.
         action_dim: The index of the action dimension to plot.
+        save_path: Path to save the plot. If None, uses default naming.
     """
     actions = [sample["action"][action_dim].item() for sample in dataset]
 
@@ -77,15 +86,23 @@ def plot_action_histogram(dataset: LeRobotDataset, action_dim: int):
     plt.title(f"Action Dimension {action_dim} Distribution")
     plt.xlabel("Action Value")
     plt.ylabel("Frequency")
-    plt.show()
+    
+    # Save plot instead of showing
+    if save_path is None:
+        save_path = f"action_histogram_dim_{action_dim}.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    print(f"💾 Saved action histogram to {save_path}")
 
 
-def plot_all_action_histograms(dataset: LeRobotDataset):
+def plot_all_action_histograms(dataset: LeRobotDataset, sample_ratio: float = 1.0, save_path: str = None):
     """
     Plots histograms for all action dimensions.
     
     Args:
         dataset: A LeRobotDataset instance.
+        sample_ratio: Fraction of data to sample for faster plotting (0.1 = 10% of data)
+        save_path: Path to save the plot. If None, uses default naming.
     """
     start_time = time.time()
     print("📊 Creating action histograms...")
@@ -98,16 +115,27 @@ def plot_all_action_histograms(dataset: LeRobotDataset):
     joint_names = [f'Joint {i+1}' for i in range(action_dim-1)] + ['Gripper'] if action_dim == 7 else [f'Dim {i}' for i in range(action_dim)]
     print(f"      Action space: {action_dim} dimensions ({time.time() - sample_start:.3f}s)")
     
+    # Determine sampling strategy
+    dataset_len = len(dataset)
+    if sample_ratio < 1.0:
+        sample_size = int(dataset_len * sample_ratio)
+        indices = np.random.choice(dataset_len, sample_size, replace=False)
+        indices = sorted(indices)
+        print(f"   🎲 Sampling {sample_size}/{dataset_len} data points ({sample_ratio*100:.1f}%) for faster plotting")
+    else:
+        indices = range(dataset_len)
+        sample_size = dataset_len
+        print(f"   📊 Plotting full dataset ({dataset_len} data points)")
+    
     # Collect all actions
     print("   📊 Loading action data...")
     load_start = time.time()
     all_actions = []
-    dataset_len = len(dataset)
     
-    for i in range(dataset_len):
-        if i % max(1, dataset_len // 10) == 0:  # Progress every 10%
-            print(f"      Loading: {i}/{dataset_len} ({i/dataset_len*100:.1f}%)")
-        all_actions.append(dataset[i]["action"].numpy())
+    for i, idx in enumerate(indices):
+        if i % max(1, len(indices) // 10) == 0:  # Progress every 10%
+            print(f"      Loading: {i}/{len(indices)} ({i/len(indices)*100:.1f}%)")
+        all_actions.append(dataset[idx]["action"].numpy())
     
     all_actions = np.array(all_actions)
     load_time = time.time() - load_start
@@ -158,10 +186,15 @@ def plot_all_action_histograms(dataset: LeRobotDataset):
     plt.suptitle('📊 All Action Dimension Distributions', fontsize=16, y=1.02)
     finalize_time = time.time() - finalize_start
     
-    print("   📺 Displaying plot...")
-    show_start = time.time()
-    plt.show()
-    show_time = time.time() - show_start
+    # Save plot instead of showing
+    print("   💾 Saving plot...")
+    save_start = time.time()
+    if save_path is None:
+        save_path = "all_action_histograms.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    save_time = time.time() - save_start
+    print(f"💾 Saved action histograms to {save_path}")
     
     total_time = time.time() - start_time
     print(f"⏱️  Action histogram timing:")
@@ -170,16 +203,17 @@ def plot_all_action_histograms(dataset: LeRobotDataset):
     print(f"   Plot setup: {setup_time:.3f}s ({setup_time/total_time*100:.1f}%)")
     print(f"   Histogram creation: {plot_time:.2f}s ({plot_time/total_time*100:.1f}%)")
     print(f"   Finalization: {finalize_time:.3f}s ({finalize_time/total_time*100:.1f}%)")
-    print(f"   Display: {show_time:.3f}s ({show_time/total_time*100:.1f}%)")
+    print(f"   Saving: {save_time:.3f}s ({save_time/total_time*100:.1f}%)")
 
 
-def visualize_episode_trajectory(dataset: LeRobotDataset, episode_idx: int = 0):
+def visualize_episode_trajectory(dataset: LeRobotDataset, episode_idx: int = 0, save_path: str = None):
     """
     Visualizes the action trajectory for a specific episode.
     
     Args:
         dataset: A LeRobotDataset instance
         episode_idx: Index of the episode to visualize
+        save_path: Path to save the plot. If None, uses default naming.
     """
     start_time = time.time()
     print(f"📈 Visualizing episode {episode_idx} trajectory...")
@@ -260,10 +294,15 @@ def visualize_episode_trajectory(dataset: LeRobotDataset, episode_idx: int = 0):
     plt.suptitle(f'🎯 Episode {episode_idx} Action/State Trajectory', fontsize=16, y=1.02)
     finalize_time = time.time() - finalize_start
     
-    print("   📺 Displaying plot...")
-    show_start = time.time()
-    plt.show()
-    show_time = time.time() - show_start
+    # Save plot instead of showing
+    print("   💾 Saving plot...")
+    save_start = time.time()
+    if save_path is None:
+        save_path = f"episode_{episode_idx}_trajectory.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    save_time = time.time() - save_start
+    print(f"💾 Saved episode trajectory to {save_path}")
     
     total_time = time.time() - start_time
     
@@ -278,20 +317,26 @@ def visualize_episode_trajectory(dataset: LeRobotDataset, episode_idx: int = 0):
     print(f"   Plot setup: {setup_time:.3f}s ({setup_time/total_time*100:.1f}%)")
     print(f"   Trajectory plotting: {plot_time:.2f}s ({plot_time/total_time*100:.1f}%)")
     print(f"   Finalization: {finalize_time:.3f}s ({finalize_time/total_time*100:.1f}%)")
-    print(f"   Display: {show_time:.3f}s ({show_time/total_time*100:.1f}%)")
+    print(f"   Saving: {save_time:.3f}s ({save_time/total_time*100:.1f}%)")
 
 
-def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max_frames: int = 100):
+def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max_frames: int = 20, 
+                             frame_skip: int = 5, resize_factor: float = 0.25, save_path: str = None):
     """
     Creates an animation showing the robot's view during an episode.
+    Optimized for speed with image resizing and frame skipping.
     
     Args:
         dataset: A LeRobotDataset instance
         episode_idx: Episode to animate
-        max_frames: Maximum number of frames to include
+        max_frames: Maximum number of frames to include (default: 20, reduced from 100)
+        frame_skip: Take every Nth frame (default: 5, skip 4 frames between each used frame)
+        resize_factor: Factor to resize images (default: 0.25 = 1/4 size)
+        save_path: Path to save the plot. If None, uses default naming.
     """
     start_time = time.time()
-    print(f"🎬 Creating animation for episode {episode_idx}...")
+    print(f"🎬 Creating optimized animation for episode {episode_idx}...")
+    print(f"   🚀 Speed optimizations: max_frames={max_frames}, frame_skip={frame_skip}, resize_factor={resize_factor}")
     
     # Get episode data indices  
     print("   📊 Getting episode information...")
@@ -299,18 +344,26 @@ def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max
     from_idx = dataset.episode_data_index["from"][episode_idx].item()
     to_idx = dataset.episode_data_index["to"][episode_idx].item()
     episode_length = to_idx - from_idx
-    step_size = max(1, episode_length // max_frames)
-    actual_frames = len(range(from_idx, to_idx, step_size))
-    print(f"      Episode: {episode_length} steps, sampling every {step_size} steps -> {actual_frames} frames ({time.time() - indices_start:.3f}s)")
+    
+    # Apply frame skipping first, then limit to max_frames
+    available_indices = list(range(from_idx, to_idx, frame_skip))
+    step_size = max(1, len(available_indices) // max_frames)
+    selected_indices = available_indices[::step_size][:max_frames]
+    actual_frames = len(selected_indices)
+    
+    print(f"      Episode: {episode_length} steps")
+    print(f"      After frame skip ({frame_skip}): {len(available_indices)} frames") 
+    print(f"      After max limit ({max_frames}): {actual_frames} frames")
+    print(f"      Selection completed ({time.time() - indices_start:.3f}s)")
     
     # Collect frames and actions
-    print("   🖼️  Loading frames and actions...")
+    print("   🖼️  Loading and resizing frames...")
     load_start = time.time()
     frames = []
     actions = []
     
-    for i, step_idx in enumerate(range(from_idx, to_idx, step_size)):
-        if i % max(1, actual_frames // 10) == 0:  # Progress every 10%
+    for i, step_idx in enumerate(selected_indices):
+        if i % max(1, actual_frames // 5) == 0:  # Progress every 20%
             print(f"      Loading frame {i+1}/{actual_frames} ({i/actual_frames*100:.1f}%)")
         
         sample = dataset[step_idx]
@@ -328,6 +381,16 @@ def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max
                 image = image.permute(1, 2, 0).numpy()
             else:
                 image = image.numpy()
+            
+            # Resize image for speed
+            if resize_factor != 1.0:
+                h, w = image.shape[:2]
+                new_h, new_w = int(h * resize_factor), int(w * resize_factor)
+                if len(image.shape) == 3:
+                    # Use simple numpy slicing for downsampling (faster than cv2 for our case)
+                    step_h, step_w = max(1, h // new_h), max(1, w // new_w)
+                    image = image[::step_h, ::step_w]
+                
             frames.append(image)
             actions.append(sample['action'].numpy())
     
@@ -337,26 +400,28 @@ def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max
         print("❌ No images found in episode")
         return
     
-    print(f"      Loaded {len(frames)} frames ({load_time:.2f}s)")
+    print(f"      Loaded and resized {len(frames)} frames ({load_time:.2f}s)")
+    if frames:
+        print(f"      Frame size: {frames[0].shape} (resize factor: {resize_factor})")
     
     # Create static visualization instead of animation for better compatibility
     print("   🎨 Creating frame visualization...")
     viz_start = time.time()
     num_display = min(6, len(frames))
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))  # Smaller figure size
     axes = axes.flatten()
     
     for i in range(num_display):
         frame_idx = i * len(frames) // num_display
         axes[i].imshow(frames[frame_idx])
-        axes[i].set_title(f'Frame {frame_idx + 1}')
+        axes[i].set_title(f'Frame {frame_idx + 1}', fontsize=10)
         axes[i].axis('off')
         
-        # Add action info
+        # Add action info with smaller font
         action_text = f'Action: [{", ".join([f"{x:.2f}" for x in actions[frame_idx][:3]])}...]'
         axes[i].text(0.02, 0.02, action_text, transform=axes[i].transAxes, 
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
-                    fontsize=8)
+                    fontsize=7)
     
     # Hide empty subplots
     for i in range(num_display, 6):
@@ -365,28 +430,32 @@ def create_training_animation(dataset: LeRobotDataset, episode_idx: int = 0, max
     viz_time = time.time() - viz_start
     print(f"      Frame grid created ({viz_time:.2f}s)")
     
-    # Finalize and show
+    # Finalize and save
     print("   🎨 Finalizing animation...")
     finalize_start = time.time()
     plt.tight_layout()
-    plt.suptitle(f'🎬 Episode {episode_idx} - Key Frames', fontsize=16, y=1.02)
+    plt.suptitle(f'🎬 Episode {episode_idx} - Key Frames (Optimized)', fontsize=14, y=1.02)
     finalize_time = time.time() - finalize_start
     
-    print("   📺 Displaying animation...")
-    show_start = time.time()
-    plt.show()
-    show_time = time.time() - show_start
+    print("   💾 Saving animation...")
+    save_start = time.time()
+    if save_path is None:
+        save_path = f"episode_{episode_idx}_animation_optimized.png"
+    plt.savefig(save_path, dpi=80, bbox_inches='tight')  # Lower DPI for speed
+    plt.close()
+    save_time = time.time() - save_start
+    print(f"💾 Saved optimized animation to {save_path}")
     
     total_time = time.time() - start_time
-    print(f"⏱️  Animation creation timing:")
+    print(f"⏱️  Optimized animation timing:")
     print(f"   Total time: {total_time:.2f}s")
     print(f"   Frame loading: {load_time:.2f}s ({load_time/total_time*100:.1f}%)")
     print(f"   Visualization: {viz_time:.2f}s ({viz_time/total_time*100:.1f}%)")
     print(f"   Finalization: {finalize_time:.3f}s ({finalize_time/total_time*100:.1f}%)")
-    print(f"   Display: {show_time:.3f}s ({show_time/total_time*100:.1f}%)")
+    print(f"   Saving: {save_time:.3f}s ({save_time/total_time*100:.1f}%)")
 
 
-def compare_augmentation_effects(dataset: LeRobotDataset, transforms_list: list, transform_names: list):
+def compare_augmentation_effects(dataset: LeRobotDataset, transforms_list: list, transform_names: list, save_path: str = None):
     """
     Compare the effects of different augmentation transforms.
     
@@ -394,6 +463,7 @@ def compare_augmentation_effects(dataset: LeRobotDataset, transforms_list: list,
         dataset: A LeRobotDataset instance
         transforms_list: List of transform objects to compare
         transform_names: List of names for the transforms
+        save_path: Path to save the plot. If None, uses default naming.
     """
     print("🎨 Comparing augmentation effects...")
     
@@ -432,4 +502,10 @@ def compare_augmentation_effects(dataset: LeRobotDataset, transforms_list: list,
     
     plt.tight_layout()
     plt.suptitle('🎨 Augmentation Comparison', fontsize=16, y=1.02)
-    plt.show() 
+    
+    # Save plot instead of showing
+    if save_path is None:
+        save_path = "augmentation_effects_comparison.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    print(f"💾 Saved augmentation comparison to {save_path}") 

@@ -119,31 +119,31 @@ def analyze_episodes(dataset: LeRobotDataset):
     return episode_analysis
 
 
-def compare_episodes(dataset: LeRobotDataset, episode_indices=None):
+def compare_episodes(dataset: LeRobotDataset, episode_indices=None, save_path: str = None):
     """
-    Compare action trajectories across episodes.
+    Compare action trajectories across different episodes.
     
     Args:
         dataset: A LeRobotDataset instance
-        episode_indices: List of episode indices to compare (default: first 3)
+        episode_indices: List of episode indices to compare (default: first 3 episodes)
+        save_path: Path to save the plot. If None, uses default naming.
     """
     start_time = time.time()
+    print("🔄 Comparing episodes...")
     
     if episode_indices is None:
-        episode_indices = list(range(min(3, len(dataset.meta.episodes))))
+        episode_indices = [0, 1, 2]  # Default to first 3 episodes
+        episode_indices = [i for i in episode_indices if i < len(dataset.episode_data_index["from"])]
     
-    print(f"📈 Comparing episodes {episode_indices}...")
+    print(f"   📊 Comparing episodes: {episode_indices}")
     
     # Get action dimensions
-    print("   🔍 Analyzing action dimensions...")
-    sample_start = time.time()
     sample = dataset[0]
-    action_dim = sample['action'].shape[0]
+    action_dim = sample["action"].shape[0]
     joint_names = [f'Joint {i+1}' for i in range(action_dim-1)] + ['Gripper'] if action_dim == 7 else [f'Dim {i}' for i in range(action_dim)]
-    print(f"      Action space: {action_dim} dimensions ({time.time() - sample_start:.3f}s)")
     
-    # Setup plotting
-    print("   🎨 Setting up plot structure...")
+    # Set up plots
+    print("   🎨 Setting up comparison plots...")
     plot_setup_start = time.time()
     fig, axes = plt.subplots(action_dim, 1, figsize=(15, 3*action_dim))
     if action_dim == 1:
@@ -196,10 +196,15 @@ def compare_episodes(dataset: LeRobotDataset, episode_indices=None):
     plt.suptitle('🔄 Episode Action Trajectory Comparison', fontsize=16, y=1.02)
     finalize_time = time.time() - finalize_start
     
-    print("   📺 Displaying plot...")
-    show_start = time.time()
-    plt.show()
-    show_time = time.time() - show_start
+    # Save plot instead of showing
+    print("   💾 Saving plot...")
+    save_start = time.time()
+    if save_path is None:
+        save_path = "episode_comparison.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
+    save_time = time.time() - save_start
+    print(f"💾 Saved episode comparison to {save_path}")
     
     total_time = time.time() - start_time
     print(f"⏱️  Episode comparison timing:")
@@ -207,29 +212,42 @@ def compare_episodes(dataset: LeRobotDataset, episode_indices=None):
     print(f"   Data loading: {data_loading_time:.2f}s ({data_loading_time/total_time*100:.1f}%)")
     print(f"   Plotting: {plotting_time:.2f}s ({plotting_time/total_time*100:.1f}%)")
     print(f"   Plot finalization: {finalize_time:.3f}s ({finalize_time/total_time*100:.1f}%)")
-    print(f"   Display: {show_time:.3f}s ({show_time/total_time*100:.1f}%)")
+    print(f"   Saving: {save_time:.3f}s ({save_time/total_time*100:.1f}%)")
 
 
-def analyze_action_patterns(dataset: LeRobotDataset):
+def analyze_action_patterns(dataset: LeRobotDataset, sample_ratio: float = 1.0, save_path_prefix: str = None):
     """
     Analyze action patterns and dynamics in the dataset.
     
     Args:
         dataset: A LeRobotDataset instance
+        sample_ratio: Fraction of data to sample for faster analysis (0.1 = 10% of data)
+        save_path_prefix: Prefix for saved plot files. If None, uses default naming.
     """
     start_time = time.time()
     print("🎯 Analyzing action patterns...")
+    
+    # Determine sampling strategy
+    dataset_len = len(dataset)
+    if sample_ratio < 1.0:
+        sample_size = int(dataset_len * sample_ratio)
+        indices = np.random.choice(dataset_len, sample_size, replace=False)
+        indices = sorted(indices)
+        print(f"   🎲 Sampling {sample_size}/{dataset_len} data points ({sample_ratio*100:.1f}%) for faster analysis")
+    else:
+        indices = range(dataset_len)
+        sample_size = dataset_len
+        print(f"   📊 Analyzing full dataset ({dataset_len} data points)")
     
     # Collect all actions
     print("   📊 Loading action data...")
     load_start = time.time()
     all_actions = []
     
-    dataset_len = len(dataset)
-    for i in range(dataset_len):
-        if i % max(1, dataset_len // 10) == 0:  # Progress every 10%
-            print(f"      Loading actions: {i}/{dataset_len} ({i/dataset_len*100:.1f}%)")
-        action = dataset[i]['action'].numpy()
+    for i, idx in enumerate(indices):
+        if i % max(1, len(indices) // 10) == 0:  # Progress every 10%
+            print(f"      Loading actions: {i}/{len(indices)} ({i/len(indices)*100:.1f}%)")
+        action = dataset[idx]['action'].numpy()
         all_actions.append(action)
     
     all_actions = np.array(all_actions)
@@ -276,11 +294,16 @@ def analyze_action_patterns(dataset: LeRobotDataset):
     plt.tight_layout()
     plt.suptitle('📊 Action Value Distributions', fontsize=16, y=1.02)
     
-    show1_start = time.time()
-    plt.show()
+    save1_start = time.time()
+    if save_path_prefix is None:
+        save_path = "action_distributions.png"
+    else:
+        save_path = f"{save_path_prefix}_action_distributions.png"
+    plt.savefig(save_path, dpi=100, bbox_inches='tight')
+    plt.close()
     plot1_time = time.time() - plot1_start
-    show1_time = time.time() - show1_start
-    print(f"      Action distributions plotted ({plot1_time - show1_time:.3f}s + {show1_time:.3f}s display)")
+    save1_time = time.time() - save1_start
+    print(f"      Action distributions plotted and saved to {save_path} ({plot1_time - save1_time:.3f}s + {save1_time:.3f}s saving)")
     
     if len(action_velocities) > 0:
         # 2. Action velocity distributions
@@ -299,11 +322,16 @@ def analyze_action_patterns(dataset: LeRobotDataset):
         plt.tight_layout()
         plt.suptitle('⚡ Action Velocity Distributions', fontsize=16, y=1.02)
         
-        show2_start = time.time()
-        plt.show()
+        save2_start = time.time()
+        if save_path_prefix is None:
+            save_path = "action_velocity_distributions.png"
+        else:
+            save_path = f"{save_path_prefix}_action_velocity_distributions.png"
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close()
         plot2_time = time.time() - plot2_start
-        show2_time = time.time() - show2_start
-        print(f"      Velocity distributions plotted ({plot2_time - show2_time:.3f}s + {show2_time:.3f}s display)")
+        save2_time = time.time() - save2_start
+        print(f"      Velocity distributions plotted and saved to {save_path} ({plot2_time - save2_time:.3f}s + {save2_time:.3f}s saving)")
     
     # Print statistics
     print("   📊 Computing summary statistics...")
@@ -393,13 +421,14 @@ def analyze_overfitting_risk(dataset: LeRobotDataset):
         print("   💡 Single episode training is only useful for debugging/testing")
 
 
-def visualize_sample(dataset: LeRobotDataset, index: int):
+def visualize_sample(dataset: LeRobotDataset, index: int, save_path: str = None):
     """
     Visualizes a single sample from a LeRobotDataset.
 
     Args:
         dataset: A LeRobotDataset instance.
         index: The index of the sample to visualize.
+        save_path: Path to save the plot. If None, uses default naming.
     """
     sample = dataset[index]
 
@@ -421,7 +450,13 @@ def visualize_sample(dataset: LeRobotDataset, index: int):
 
             plt.imshow(image)
             plt.title(f"Observation Image ({image_key}) at Index {index}")
-            plt.show()
+            plt.axis('off')
+            
+            if save_path is None:
+                save_path = f"sample_{index}_visualization.png"
+            plt.savefig(save_path, dpi=100, bbox_inches='tight')
+            plt.close()
+            print(f"💾 Saved sample visualization to {save_path}")
 
     # Print the action
     if "action" in sample:
