@@ -37,7 +37,7 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device):
     policy.reset()
     
     # Load dataset  
-    dataset = LeRobotDataset(dataset_name, video_backend="opencv")
+    dataset = LeRobotDataset(dataset_name, video_backend="pyav")
     episode_indices = get_episode_indices(dataset, episode_idx)
     
     print(f"   Episode {episode_idx}: {len(episode_indices)} steps")
