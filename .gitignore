@@ -25,3 +25,13 @@ dist/
 .venv
 env/
 venv/ 
+
+
+# Data
+data/
+
+
+# TODO but maybe the below two shouldn't even be tere
+meta/
+
+videos/
