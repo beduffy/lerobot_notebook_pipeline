@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Comprehensive dataset analysis script.
 
@@ -61,8 +62,8 @@ def main():
                        help="Episode indices to analyze in detail (default: 0 1 2)")
     parser.add_argument("--sample-idx", type=int, default=0, 
                        help="Sample index for detailed visualization (default: 0)")
-    parser.add_argument("--video-backend", default="opencv", 
-                       help="Video backend for dataset loading (default: opencv)")
+    parser.add_argument("--video-backend", default="pyav", 
+                       help="Video backend for dataset loading (default: pyav)")
     parser.add_argument("--fast", action="store_true",
                        help="Enable fast mode with 10%% data sampling for quicker analysis")
     parser.add_argument("--sample-ratio", type=float, default=1.0,
@@ -89,7 +90,11 @@ def main():
 
         # Load dataset
         print("📊 Loading dataset...")
-        dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
+        if args.dataset_path in [".", "local", "local_dataset"]:
+            # Use the working method for local datasets
+            dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+        else:
+            dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
         print(f"✅ Dataset loaded: {len(dataset)} samples")
         print()
 

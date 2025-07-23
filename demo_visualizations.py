@@ -217,7 +217,7 @@ def main():
     parser.add_argument("--sample-idx", type=int, default=0, help="Sample index to visualize")
     parser.add_argument("--episodes", nargs="+", type=int, default=[0, 1, 2], 
                        help="Episode indices for episode demos")
-    parser.add_argument("--video-backend", default="opencv", help="Video backend for dataset loading")
+    parser.add_argument("--video-backend", default="pyav", help="Video backend for dataset loading")
     parser.add_argument("--output-dir", type=str, default=".",
                        help="Directory to save demo plots (default: current directory)")
     
@@ -239,7 +239,11 @@ def main():
 
         # Load dataset
         print("📊 Loading dataset...")
-        dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
+        if args.dataset_path in [".", "local", "local_dataset"]:
+            # Use the working method for local datasets
+            dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+        else:
+            dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
         print(f"✅ Dataset loaded: {len(dataset)} samples")
         print()
 
