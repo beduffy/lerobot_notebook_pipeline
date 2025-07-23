@@ -4,6 +4,8 @@ This document outlines the plan for developing the `lerobot_notebook_pipeline` r
 
 KEEP train_ultimate.py and periodically sync with train_ultimate.ipynb with jupytext
 
+conda activate robosuite
+
 ## 1. Dataset Analysis
 
 - [ ] Create a new script or notebook (`analyse_dataset.py` or `analyse_dataset.ipynb`) to inspect and visualize the training data.
@@ -44,6 +46,8 @@ TODO iterate faster. Create loads of little functions that can take in a LeRobot
 - What is the reason why ACT needs longer training etc? Can we just add noise to all data and it will be more robust to getting exact overfitting? action noise?
 Later can I move cube to different positions
 how many positions do you need between? how do NNs interpolate?
+- TODO i cannot specify root folder because of huggingface caching issues... that sucks for folder structure but works
+- decide between train_ultimate or split or whatever. 
 
 - I wanted to deeply understand everything (with notebook training)
     - even though cube is in same place for 10 episodes, could training on 1 episode make it good?
@@ -53,6 +57,7 @@ how many positions do you need between? how do NNs interpolate?
             - Why does my intuition say it will be robust to table moving? just because it is 1 cube?
 search how Ville or others did interpretability https://github.com/villekuosmanen/physical-AI-interpretability and https://villekuosmanen.medium.com/opening-the-black-box-of-robot-ai-983ab2754eec
 try bbox affordances
+- keep one episode for validation and just to see how much that differs (get plots for that), and train on rest
 
 
 # new doc
