@@ -1,5 +1,62 @@
-# Plan for lerobot_notebook_pipeline
+# what I used to do
+task_name="red_cube_always_in_same_place"
+# run in both laptop and in cloud
+huggingface-cli login --token ${HUGGINGFACE_TOKEN} --add-to-git-credential
+HF_USER=$(huggingface-cli whoami | head -n 1)
+echo $HF_USER
 
+python -m lerobot.record \
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=my_awesome_follower_arm \
+    --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 \
+    --teleop.id=my_awesome_leader_arm \
+    --display_data=true \
+    --dataset.repo_id=${HF_USER}/${task_name} \
+    --dataset.num_episodes=10 \
+    --dataset.single_task="Grab red cube and put to left"
+
+# train in cloud
+task_name="red_cube_always_in_same_place"
+run_count=1
+python lerobot/scripts/train.py \
+  --dataset.repo_id=bearlover365/${task_name} \
+  --policy.type=act \
+  --output_dir=outputs/train/${task_name}_${run_count} \
+  --job_name=${task_name} \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --dataset.video_backend=pyav
+
+python lerobot_original_train.py \
+  --dataset.repo_id=bearlover365/${task_name} \
+  --policy.type=act \
+  --output_dir=outputs/train/${task_name}_${run_count} \
+  --job_name=${task_name} \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --dataset.video_backend=pyav
+
+huggingface-cli upload ${HF_USER}/${task_name} outputs/train/${task_name}_${run_count}/checkpoints/last/pretrained_model --repo-type=model
+
+# evaluate on laptop
+python -m lerobot.record \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=my_awesome_follower_arm \
+  --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
+  --policy.path=${HF_USER}/${task_name} \
+  --dataset.repo_id=${HF_USER}/eval_${task_name} \
+  --dataset.single_task="Grab red cube and put to left" \
+  --dataset.num_episodes=1 \
+  --display_data=true
+
+
+
+# Plan for lerobot_notebook_pipeline
+# document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
 
 KEEP train_ultimate.py and periodically sync with train_ultimate.ipynb with jupytext
@@ -30,6 +87,7 @@ conda activate robosuite
 
 
 # Other todos
+TODO obviously the coolest goal of all would be to get some zero shot VLA to work! pizero over network or smolVLA. with fine tuning if needed but that defeats the entire purpose of VLA to me. 
 TODO clear space on lightning and wandb, 
 TODO show first and last image or resize a lot the animation and make it use less than 10Mb
 TODO maybe don't save models to wandb?
@@ -48,6 +106,8 @@ Later can I move cube to different positions
 how many positions do you need between? how do NNs interpolate?
 - TODO i cannot specify root folder because of huggingface caching issues... that sucks for folder structure but works
 - decide between train_ultimate or split or whatever. 
+
+
 
 - I wanted to deeply understand everything (with notebook training)
     - even though cube is in same place for 10 episodes, could training on 1 episode make it good?
