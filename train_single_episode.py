@@ -167,10 +167,10 @@ def create_dataloader(full_dataset, single_episode_indices, delta_timestamps, ba
     """Create dataloader for single episode training."""
     print(f"\n📦 Creating single-episode dataloader...")
     
-    # Auto-adjust num_workers based on environment
+    # Auto-adjust num_workers based on environment - MORE WORKERS for GPU
     if num_workers is None:
         if torch.cuda.is_available():
-            num_workers = 4  # Cloud/GPU
+            num_workers = 8  # Increased from 4 → 8 for better GPU feeding
         else:
             num_workers = 2  # Local/CPU
     
@@ -203,7 +203,7 @@ def create_dataloader(full_dataset, single_episode_indices, delta_timestamps, ba
 
 
 def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_rate=None, 
-                        log_every=None, cloud_mode=False):
+                        log_every=None, cloud_mode=False, accumulation_steps=1):
     """Train policy on single episode with OPTIMIZED training loop like LeRobot."""
     print(f"\n🚀 Starting OPTIMIZED training with LeRobot config...")
     
@@ -214,6 +214,7 @@ def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_ra
     print(f"   Training steps: {num_steps}")
     print(f"   Learning rate: {learning_rate} (from ACT config: {cfg.optimizer_lr})")
     print(f"   Weight decay: {cfg.optimizer_weight_decay}")
+    print(f"   Accumulation steps: {accumulation_steps} (effective batch size: {accumulation_steps}x)")
     print(f"   Device: {device}")
     print(f"   Mode: {'Cloud' if cloud_mode else 'Local'}")
     
@@ -258,33 +259,44 @@ def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_ra
     # Training loop
     start_time = time.time()
     
-    # OPTIMIZATION 4: CUDA performance settings
+    # OPTIMIZATION 4: AGGRESSIVE CUDA performance settings
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
+        # Additional GPU optimizations for continuous utilization
+        torch.backends.cudnn.deterministic = False  # Allow non-deterministic for speed
+        if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+            torch.backends.cuda.enable_flash_sdp(True)  # Enable Flash Attention if available
     
     for step in range(num_steps):
         step_start = time.time()
+        accumulated_loss = 0
         
-        # OPTIMIZATION 5: Efficient data loading with timing
-        data_start = time.time()
-        batch = next(dl_iter)
-        data_time = time.time() - data_start
-        data_loading_times.append(data_time)
+        # OPTIMIZATION 5: Gradient accumulation for larger effective batch size
+        for acc_step in range(accumulation_steps):
+            # Efficient data loading with timing
+            data_start = time.time()
+            batch = next(dl_iter)
+            data_time = time.time() - data_start
+            if acc_step == 0:  # Only record timing for first accumulation step
+                data_loading_times.append(data_time)
+            
+            # Move to device efficiently
+            for key in batch:
+                if isinstance(batch[key], torch.Tensor):
+                    batch[key] = batch[key].to(device, non_blocking=True)
+            
+            # OPTIMIZATION 6: Mixed precision forward pass
+            with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+                loss, output_dict = policy.forward(batch)
+                # Scale loss by accumulation steps for proper averaging
+                loss = loss / accumulation_steps
+                accumulated_loss += loss.item()
+            
+            # OPTIMIZATION 7: Scaled backward pass
+            grad_scaler.scale(loss).backward()
         
-        # Move to device efficiently
-        for key in batch:
-            if isinstance(batch[key], torch.Tensor):
-                batch[key] = batch[key].to(device, non_blocking=True)
-        
-        # OPTIMIZATION 6: Mixed precision forward pass
-        with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-            loss, output_dict = policy.forward(batch)
-        
-        # OPTIMIZATION 7: Scaled backward pass
-        grad_scaler.scale(loss).backward()
-        
-        # OPTIMIZATION 8: Unscale before gradient clipping (LeRobot style)
+        # OPTIMIZATION 8: Unscale before gradient clipping (LeRobot style) - only after accumulation
         grad_scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(
             policy.parameters(), 
@@ -292,7 +304,7 @@ def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_ra
             error_if_nonfinite=False
         )
         
-        # OPTIMIZATION 9: Scaled optimizer step
+        # OPTIMIZATION 9: Scaled optimizer step - only after accumulation
         grad_scaler.step(optimizer)
         grad_scaler.update()
         optimizer.zero_grad()
@@ -300,8 +312,8 @@ def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_ra
         # OPTIMIZATION 10: Step scheduler
         lr_scheduler.step()
         
-        # Record metrics
-        loss_value = loss.item()
+        # Record metrics (use accumulated loss)
+        loss_value = accumulated_loss
         losses.append(loss_value)
         step_time = time.time() - step_start
         step_times.append(step_time)
@@ -501,9 +513,21 @@ def main():
     # Setup environment
     env_mode = setup_environment(args.cloud)
     
-    # Auto-configure based on environment
+    # Auto-configure based on environment with LARGER effective batch sizes for GPU
     if args.batch_size is None:
-        args.batch_size = 32 if (args.cloud or torch.cuda.is_available()) else 8
+        if args.cloud or torch.cuda.is_available():
+            # GPU: Use batch size + accumulation for effective large batches
+            args.batch_size = 32  # Physical batch size (fits in memory)
+            accumulation_steps = 4  # Effective batch size = 32 * 4 = 128
+        else:
+            args.batch_size = 8
+            accumulation_steps = 1  # No accumulation for CPU
+    else:
+        # User specified batch size - add smart accumulation for GPU
+        if args.cloud or torch.cuda.is_available():
+            accumulation_steps = max(1, 128 // args.batch_size)  # Target effective batch size of 128
+        else:
+            accumulation_steps = 1
     
     if args.video_backend is None:
         # Always use pyav for now - opencv support varies by installation
@@ -560,7 +584,8 @@ def main():
         # 4. Train
         losses = train_single_episode(
             policy, dataloader, args.steps, device, cfg, 
-            learning_rate=args.lr, cloud_mode=args.cloud
+            learning_rate=args.lr, cloud_mode=args.cloud, 
+            accumulation_steps=accumulation_steps
         )
         
         # Log to wandb
