@@ -41,6 +41,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 import numpy as np
+import torch
 
 try:
     import rerun as rr
@@ -57,6 +58,7 @@ from lerobot.common.utils.control_utils import predict_action, init_keyboard_lis
 from lerobot.common.utils.robot_utils import busy_wait
 from lerobot.common.utils.utils import get_safe_torch_device, log_say
 from lerobot.common.utils.visualization_utils import _init_rerun
+from lerobot.common.cameras.opencv.configuration_opencv import OpenCVCameraConfig
 
 
 @dataclass  
@@ -104,8 +106,11 @@ class LocalRobotEvaluator:
     def __init__(self, model_path: str, config: LocalRobotEvalConfig):
         self.model_path = Path(model_path)
         self.config = config
-        # self.device = get_safe_torch_device("auto")
-        self.device = get_safe_torch_device("cpu")
+        # Use robust device detection - avoid "auto" which isn't supported
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
         
         print(f"🤖 Local Robot Evaluator")
         print(f"   Model: {self.model_path}")
@@ -119,8 +124,9 @@ class LocalRobotEvaluator:
         # Setup robot
         self._setup_robot()
         
-        # Setup dataset if recording
+        # Setup dataset if recording, but always create features for observation processing
         self.dataset = None
+        self._setup_features()  # Always setup features for observation processing
         if config.record:
             self._setup_dataset()
     
@@ -147,13 +153,28 @@ class LocalRobotEvaluator:
         print(f"   Robot ID: {self.config.robot_id} (important for calibration)")
         print(f"   Robot port: {self.config.robot_port}")
         
+        # Convert camera dict configs to proper CameraConfig objects
+        camera_configs = {}
+        for camera_name, camera_dict in self.config.robot_cameras.items():
+            if camera_dict["type"] == "opencv":
+                camera_configs[camera_name] = OpenCVCameraConfig(
+                    index_or_path=camera_dict["index_or_path"],
+                    width=camera_dict["width"],
+                    height=camera_dict["height"],
+                    fps=camera_dict["fps"]
+                )
+            else:
+                raise ValueError(f"Unsupported camera type: {camera_dict['type']}")
+        
+        print(f"   Camera configs: {list(camera_configs.keys())}")
+        
         # Create robot config (following lerobot record approach)
         if self.config.robot_type == "so101_follower":
             from lerobot.common.robots.so101_follower import SO101FollowerConfig
             
             robot_config = SO101FollowerConfig(
                 port=self.config.robot_port,
-                cameras=self.config.robot_cameras,
+                cameras=camera_configs,  # Use proper CameraConfig objects
                 id=self.config.robot_id  # This ID is crucial for calibration data
             )
         else:
@@ -162,21 +183,24 @@ class LocalRobotEvaluator:
         self.robot = make_robot_from_config(robot_config)
         print("   ✅ Robot configuration created!")
     
+    def _setup_features(self):
+        """Setup features dictionary for observation processing (always needed)."""
+        action_features = hw_to_dataset_features(self.robot.action_features, "action", True)
+        obs_features = hw_to_dataset_features(self.robot.observation_features, "observation", True) 
+        self.features = {**action_features, **obs_features}
+        print(f"   📋 Features configured: {list(self.features.keys())}")
+    
     def _setup_dataset(self):
         """Setup dataset for recording evaluation results."""
         print(f"📊 Setting up dataset for recording...")
         
-        action_features = hw_to_dataset_features(self.robot.action_features, "action", True)
-        obs_features = hw_to_dataset_features(self.robot.observation_features, "observation", True) 
-        dataset_features = {**action_features, **obs_features}
-        
-        # Create dataset
+        # Create dataset using pre-configured features
         self.dataset = LeRobotDataset.create(
             self.config.dataset_repo_id,
             self.config.fps,
             root=self.config.dataset_root,
             robot_type=self.robot.name,
-            features=dataset_features,
+            features=self.features,  # Use pre-configured features
             use_videos=True,
             image_writer_processes=0,
             image_writer_threads=4 * len(self.robot.cameras) if hasattr(self.robot, 'cameras') else 4,
@@ -212,7 +236,7 @@ class LocalRobotEvaluator:
             
             # Prepare observation for policy
             observation_frame = build_dataset_frame(
-                self.dataset.features if self.dataset else None, 
+                self.features,  # Always use self.features (setup in _setup_features)
                 observation, 
                 prefix="observation"
             )
@@ -238,11 +262,11 @@ class LocalRobotEvaluator:
             
             action_count += 1
             
-            # Record to dataset if enabled
-            if self.dataset is not None:
-                action_frame = build_dataset_frame(self.dataset.features, sent_action, prefix="action")
-                frame = {**observation_frame, **action_frame}
-                self.dataset.add_frame(frame, task=self.config.task)
+                    # Record to dataset if enabled
+        if self.dataset is not None:
+            action_frame = build_dataset_frame(self.features, sent_action, prefix="action")
+            frame = {**observation_frame, **action_frame}
+            self.dataset.add_frame(frame, task=self.config.task)
             
             # Display data if enabled
             if self.config.display_data and RERUN_AVAILABLE:
