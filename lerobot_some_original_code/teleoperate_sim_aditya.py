@@ -30,6 +30,12 @@ python -m lerobot.teleoperate_sim_aditya \
 
 python lerobot_some_original_code/teleoperate_sim_aditya.py     --teleop.type=so101_leader     --teleop.port=/dev/ttyACM0     --teleop.id=my_awesome_leader_arm     --mjcf_path=lerobot_some_original_code/standalone_scene.xml     --display_data=true     --use_random_actions=true
 
+# without scene with cube, just mujoco
+python lerobot_some_original_code/teleoperate_sim_aditya.py     --teleop.type=so101_leader     --teleop.port=/dev/ttyACM0     --teleop.id=my_awesome_leader_arm     --mjcf_path=/home/ben/all_projects/SO-ARM100/Simulation/SO101/so101_new_calib.xml     --display_data=true     --use_random_actions=true
+
+# without scene with cube, but so100
+python lerobot_some_original_code/teleoperate_sim_aditya.py     --teleop.type=so100_leader     --teleop.port=/dev/ttyACM0     --teleop.id=my_awesome_leader_arm     --mjcf_path=/home/ben/all_projects/SO-ARM100/Simulation/SO101/so101_new_calib.xml     --display_data=true     --use_random_actions=true
+
 """
 
 import time

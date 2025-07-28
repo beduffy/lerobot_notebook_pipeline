@@ -10,6 +10,9 @@ TODO either way I find it hard to visualise my documents hmm
 TODO either way I find it hard to visualise all the results too hmm, how to get better at this?
 TODO again try to pick up red cube. make plane higher and cube at right place
 TODO download my 10 episode model and do same analysis here, prove how much better it is! 
+TODO ctrl c should be more safe, e.g. timer of 3 seconds for me to put hand underneath so it doesn't crash into table or go back to original safe position?
+TODO does simulate work better with so101. understand maniskill so100 example pickcube-v1 perfectly and then use that. 
+TODO XLErobot mujoco try!! 
 
 # document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
