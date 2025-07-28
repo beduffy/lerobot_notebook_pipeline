@@ -30,6 +30,7 @@ venv/
 # Data
 data/
 
+MUJOCO_LOG.TXT
 
 # TODO but maybe the below two shouldn't even be tere
 meta/

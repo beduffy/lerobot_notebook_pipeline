@@ -8,6 +8,8 @@ Another goal is to see how training on one episode how badly it does on other ep
 TODO should I write here my logs in hack log on notion? 
 TODO either way I find it hard to visualise my documents hmm
 TODO either way I find it hard to visualise all the results too hmm, how to get better at this?
+TODO again try to pick up red cube. make plane higher and cube at right place
+TODO download my 10 episode model and do same analysis here, prove how much better it is! 
 
 # document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
