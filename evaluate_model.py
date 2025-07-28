@@ -51,17 +51,22 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device):
             try:
                 sample = dataset[idx]
                 
-                # Prepare input
+                # Prepare input - ONLY OBSERVATIONS FOR INFERENCE
                 batch = {}
                 for key, value in sample.items():
-                    if isinstance(value, torch.Tensor):
+                    if key.startswith("observation.") and isinstance(value, torch.Tensor):
                         batch[key] = value.unsqueeze(0).to(device)
-                    else:
-                        batch[key] = value
                 
-                # Get prediction
-                pred_action = policy.select_action(batch)
-                gt_action = sample["action"].to(device)
+                # Get prediction - ACT outputs chunk of actions, take first one
+                pred_action_chunk = policy.select_action(batch)  # Shape: [1, action_dim] or [1, chunk_size, action_dim]
+                
+                # Handle both chunked and non-chunked outputs
+                if pred_action_chunk.dim() == 3:  # [batch, chunk_size, action_dim]
+                    pred_action = pred_action_chunk[0, 0, :]  # Take first action from chunk
+                else:  # [batch, action_dim]
+                    pred_action = pred_action_chunk[0, :]  # Take first action
+                
+                gt_action = sample["action"]  # Ground truth action
                 
                 predictions.append(pred_action.cpu())
                 ground_truths.append(gt_action.cpu())
