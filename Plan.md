@@ -1,61 +1,14 @@
-# what I used to do
-task_name="red_cube_always_in_same_place"
-# run in both laptop and in cloud
-huggingface-cli login --token ${HUGGINGFACE_TOKEN} --add-to-git-credential
-HF_USER=$(huggingface-cli whoami | head -n 1)
-echo $HF_USER
-
-python -m lerobot.record \
-    --robot.type=so101_follower \
-    --robot.port=/dev/ttyACM0 \
-    --robot.id=my_awesome_follower_arm \
-    --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
-    --teleop.type=so101_leader \
-    --teleop.port=/dev/ttyACM1 \
-    --teleop.id=my_awesome_leader_arm \
-    --display_data=true \
-    --dataset.repo_id=${HF_USER}/${task_name} \
-    --dataset.num_episodes=10 \
-    --dataset.single_task="Grab red cube and put to left"
-
-# train in cloud
-task_name="red_cube_always_in_same_place"
-run_count=1
-python lerobot/scripts/train.py \
-  --dataset.repo_id=bearlover365/${task_name} \
-  --policy.type=act \
-  --output_dir=outputs/train/${task_name}_${run_count} \
-  --job_name=${task_name} \
-  --policy.device=cuda \
-  --wandb.enable=true \
-  --dataset.video_backend=pyav
-
-python lerobot_original_train.py \
-  --dataset.repo_id=bearlover365/${task_name} \
-  --policy.type=act \
-  --output_dir=outputs/train/${task_name}_${run_count} \
-  --job_name=${task_name} \
-  --policy.device=cuda \
-  --wandb.enable=true \
-  --dataset.video_backend=pyav
-
-huggingface-cli upload ${HF_USER}/${task_name} outputs/train/${task_name}_${run_count}/checkpoints/last/pretrained_model --repo-type=model
-
-# evaluate on laptop
-python -m lerobot.record \
-  --robot.type=so101_follower \
-  --robot.port=/dev/ttyACM0 \
-  --robot.id=my_awesome_follower_arm \
-  --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
-  --policy.path=${HF_USER}/${task_name} \
-  --dataset.repo_id=${HF_USER}/eval_${task_name} \
-  --dataset.single_task="Grab red cube and put to left" \
-  --dataset.num_episodes=1 \
-  --display_data=true
-
-
-
 # Plan for lerobot_notebook_pipeline
+
+July 28th (and last week):
+Big goal is to train on one episode and see how it does
+
+Another goal is to see how training on one episode how badly it does on other episodes, then increase number of episodes... Even don't train fully to prove that 
+
+TODO should I write here my logs in hack log on notion? 
+TODO either way I find it hard to visualise my documents hmm
+TODO either way I find it hard to visualise all the results too hmm, how to get better at this?
+
 # document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
 
@@ -79,7 +32,7 @@ conda activate robosuite
 ## 3. Policy Visualization
 
 - [ ] Create a script (`visualize_policy.py`) to load a trained policy.
-- [ ] Run the policy in a simulated environment.
+- [ ] Run the policy in a simulated environment but make sure to use original real world images, this is just a way to see how shaky the policy is
 - [ ] Render the environment to visualize the policy's actions.
 - [ ] Save a video or gif of the visualization.
 
@@ -291,3 +244,61 @@ This document outlines the plan for developing the `lerobot_notebook_pipeline` r
 ---
 
 **Remember**: You're not just training robots - you're building intuition about how learning works in the physical world. Each experiment brings you closer to understanding what makes robots truly useful in the real world! 🤖✨
+
+
+
+
+# what I used to do
+task_name="red_cube_always_in_same_place"
+# run in both laptop and in cloud
+huggingface-cli login --token ${HUGGINGFACE_TOKEN} --add-to-git-credential
+HF_USER=$(huggingface-cli whoami | head -n 1)
+echo $HF_USER
+
+python -m lerobot.record \
+    --robot.type=so101_follower \
+    --robot.port=/dev/ttyACM0 \
+    --robot.id=my_awesome_follower_arm \
+    --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
+    --teleop.type=so101_leader \
+    --teleop.port=/dev/ttyACM1 \
+    --teleop.id=my_awesome_leader_arm \
+    --display_data=true \
+    --dataset.repo_id=${HF_USER}/${task_name} \
+    --dataset.num_episodes=10 \
+    --dataset.single_task="Grab red cube and put to left"
+
+# train in cloud
+task_name="red_cube_always_in_same_place"
+run_count=1
+python lerobot/scripts/train.py \
+  --dataset.repo_id=bearlover365/${task_name} \
+  --policy.type=act \
+  --output_dir=outputs/train/${task_name}_${run_count} \
+  --job_name=${task_name} \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --dataset.video_backend=pyav
+
+python lerobot_original_train.py \
+  --dataset.repo_id=bearlover365/${task_name} \
+  --policy.type=act \
+  --output_dir=outputs/train/${task_name}_${run_count} \
+  --job_name=${task_name} \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --dataset.video_backend=pyav
+
+huggingface-cli upload ${HF_USER}/${task_name} outputs/train/${task_name}_${run_count}/checkpoints/last/pretrained_model --repo-type=model
+
+# evaluate on laptop
+python -m lerobot.record \
+  --robot.type=so101_follower \
+  --robot.port=/dev/ttyACM0 \
+  --robot.id=my_awesome_follower_arm \
+  --robot.cameras="{ front: {type: opencv, index_or_path: 4, width: 640, height: 480, fps: 30}}" \
+  --policy.path=${HF_USER}/${task_name} \
+  --dataset.repo_id=${HF_USER}/eval_${task_name} \
+  --dataset.single_task="Grab red cube and put to left" \
+  --dataset.num_episodes=1 \
+  --display_data=true

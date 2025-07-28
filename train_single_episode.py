@@ -65,6 +65,7 @@ except ImportError:
     HF_AVAILABLE = False
 
 
+# TODO can we specify multiple indices in numpy slicing format? would be nice
 def get_single_episode_indices(dataset: LeRobotDataset, episode_idx: int) -> list:
     """Get all data indices for a single episode."""
     from_idx = dataset.episode_data_index["from"][episode_idx].item()
@@ -108,8 +109,9 @@ def setup_policy_and_config(metadata):
     input_features = {key: ft for key, ft in features.items() if key not in output_features}
     
     # Remove wrist camera if present (using front camera only)
-    if "observation.wrist_image" in input_features:
-        input_features.pop("observation.wrist_image")
+    # TODO actually I mislabelled on recording, the front is the wrist... 
+    # if "observation.wrist_image" in input_features:
+    #     input_features.pop("observation.wrist_image")
     
     print(f"   Input features: {list(input_features.keys())}")
     print(f"   Output features: {list(output_features.keys())}")
@@ -223,7 +225,7 @@ def train_single_episode(policy, dataloader, num_steps, device, cfg, learning_ra
         if cloud_mode or num_steps > 500:
             log_every = 100  # Less frequent for cloud/long runs
         else:
-            log_every = 50   # More frequent for local/short runs
+            log_every = 10   # More frequent for local/short runs
     
     # Setup training - OPTIMIZED like LeRobot with proper config
     policy.to(device)
