@@ -26,6 +26,10 @@ python -m lerobot.teleoperate_sim_aditya \
     --mjcf_path=lerobot/standalone_scene.xml \
     --display_data=true \
     --use_random_actions=false
+
+
+python lerobot_some_original_code/teleoperate_sim_aditya.py     --teleop.type=so101_leader     --teleop.port=/dev/ttyACM0     --teleop.id=my_awesome_leader_arm     --mjcf_path=lerobot_some_original_code/standalone_scene.xml     --display_data=true     --use_random_actions=true
+
 """
 
 import time
@@ -47,7 +51,8 @@ from lerobot.common.utils.utils import init_logging
 from lerobot.common.utils.visualization_utils import _init_rerun
 import numpy as np
 
-from .common.teleoperators import koch_leader, so100_leader, so101_leader  # noqa: F401
+# from .common.teleoperators import koch_leader, so100_leader, so101_leader  # noqa: F401
+from lerobot.common.teleoperators import koch_leader, so100_leader, so101_leader  # noqa: F401
 from typing import Optional
 
 print('Mujoco version:', mujoco.__version__)
