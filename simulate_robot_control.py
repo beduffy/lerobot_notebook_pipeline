@@ -45,7 +45,7 @@ from lerobot.common.policies.act.modeling_act import ACTPolicy
 class RobotControlSimulator:
     """Simulates robot control with real images and policy predictions."""
     
-    def __init__(self, policy_path, dataset_name, episode_idx=0, device="auto"):
+    def __init__(self, policy_path, dataset_name, episode_idx=0, start_step=0, device="auto"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
         
         # Load policy
@@ -66,7 +66,7 @@ class RobotControlSimulator:
         self._load_episode_data()
         
         # Initialize robot state and tracking
-        self.current_step = 0
+        self.current_step = start_step
         self.robot_joint_positions = np.zeros(6)  # 6-DOF robot
         self.joint_velocities = np.zeros(6)
         
@@ -422,7 +422,7 @@ def analyze_control_performance(action_history, position_history, velocity_histo
     }
 
 
-def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, 
+def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, start_step=0,
                                 max_steps=100, speed=1.0, visualize=True, use_mujoco=True):
     """Main robot control simulation loop."""
     
@@ -431,13 +431,14 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0,
     print(f"🧠 Policy: {policy_path}")
     print(f"📊 Dataset: {dataset_name}")
     print(f"📏 Episode: {episode_idx}")
+    print(f"🏁 Start Step: {start_step}")
     print(f"🎯 Max Steps: {max_steps}")
     print(f"⚡ Speed: {speed}x")
     print(f"🖥️  MuJoCo: {'Enabled' if use_mujoco and MUJOCO_AVAILABLE else 'Disabled'}")
     print()
     
     # Initialize simulator
-    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx)
+    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx, start_step)
     
     if not use_mujoco:
         simulator.mujoco_model = None
@@ -570,6 +571,8 @@ def main():
                        help='Dataset name')
     parser.add_argument('--episode', type=int, default=0,
                        help='Episode index to use for images')
+    parser.add_argument('--start-step', type=int, default=0,
+                       help='Starting step within episode')
     parser.add_argument('--steps', type=int, default=100,
                        help='Maximum steps to simulate')
     parser.add_argument('--speed', type=float, default=1.0,
@@ -592,6 +595,7 @@ def main():
             policy_path=args.policy_path,
             dataset_name=args.dataset,
             episode_idx=args.episode,
+            start_step=args.start_step,
             max_steps=args.steps,
             speed=args.speed,
             visualize=not args.no_visualization,
