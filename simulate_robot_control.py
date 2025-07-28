@@ -106,7 +106,8 @@ class RobotControlSimulator:
         """Setup MuJoCo simulation using existing SO101 arm."""
         try:
             # Use the existing SO101 arm XML file
-            xml_path = "lerobot_some_original_code/standalone_scene.xml"
+            # xml_path = "lerobot_some_original_code/standalone_scene.xml"
+            xml_path = "lerobot_some_original_code/simple_scene.xml"
             
             self.mujoco_model = mujoco.MjModel.from_xml_path(xml_path)
             self.mujoco_data = mujoco.MjData(self.mujoco_model)
