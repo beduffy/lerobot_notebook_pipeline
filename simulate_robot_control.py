@@ -182,11 +182,9 @@ class RobotControlSimulator:
         """Apply predicted action to robot (following teleoperate_sim_aditya.py approach)."""
         # Apply to MuJoCo if available
         if self.mujoco_model is not None and self.mujoco_data is not None and hasattr(self, 'mujoco_joint_indices'):
-            # Convert actions from radians to degrees (policy outputs radians, MuJoCo expects degrees)
-            joint_values_deg = np.rad2deg(action[:6])  # Take first 6 joints
-            
-            # Convert back to radians for MuJoCo (following teleoperate_sim_aditya.py)
-            joint_values_rad = np.deg2rad(joint_values_deg)
+            # Dataset actions are in degrees, MuJoCo expects radians (following teleoperate_sim_aditya.py)
+            joint_values_deg = action[:6]  # Policy outputs degrees (same as dataset)
+            joint_values_rad = np.deg2rad(joint_values_deg)  # Convert to radians for MuJoCo
             
             # Set joint positions using the mapped indices
             for idx, val in zip(self.mujoco_joint_indices, joint_values_rad):
@@ -401,8 +399,9 @@ def analyze_control_performance(action_history, position_history, velocity_histo
     action_derivatives = np.diff(actions, axis=0)
     control_smoothness = np.mean(np.linalg.norm(action_derivatives, axis=1))
     
-    # Tracking performance
-    tracking_errors = np.linalg.norm(actions - positions, axis=1)
+    # Tracking performance (convert positions from radians to degrees for comparison)
+    positions_deg = np.rad2deg(positions)
+    tracking_errors = np.linalg.norm(actions - positions_deg, axis=1)
     avg_tracking_error = np.mean(tracking_errors)
     max_tracking_error = np.max(tracking_errors)
     
@@ -475,10 +474,18 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0,
                     # Sync MuJoCo viewer
                     viewer.sync()
                     
-                    # Print progress
-                    if step % 10 == 0:
-                        tracking_error = np.linalg.norm(predicted_action - simulator.robot_joint_positions)
-                        print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}, Pred_time={pred_time*1000:.1f}ms")
+                    # Print progress and action values
+                    if step % 5 == 0:
+                        # Convert robot positions back to degrees for comparison
+                        robot_pos_deg = np.rad2deg(simulator.robot_joint_positions)
+                        tracking_error = np.linalg.norm(predicted_action - robot_pos_deg)
+                        print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}°, Pred_time={pred_time*1000:.1f}ms")
+                        print(f"  Policy Action (deg): {predicted_action}")
+                        print(f"  GT Action (deg):     {gt_action}")
+                        print(f"  Robot Pos (deg):     {robot_pos_deg}")
+                        print(f"  Robot Pos (rad):     {simulator.robot_joint_positions}")
+                        print(f"  Action Range:        [{predicted_action.min():.3f}, {predicted_action.max():.3f}]°")
+                        print()
                     
                     # Control simulation speed
                     time.sleep(1.0 / (30 * speed))  # 30 FPS base rate
@@ -492,10 +499,18 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0,
                 if visualizer:
                     visualizer.update(predicted_action, simulator.robot_joint_positions, simulator.joint_velocities)
                 
-                # Print progress
-                if step % 10 == 0:
-                    tracking_error = np.linalg.norm(predicted_action - simulator.robot_joint_positions)
-                    print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}, Pred_time={pred_time*1000:.1f}ms")
+                # Print progress and action values
+                if step % 5 == 0:
+                    # Convert robot positions back to degrees for comparison
+                    robot_pos_deg = np.rad2deg(simulator.robot_joint_positions)
+                    tracking_error = np.linalg.norm(predicted_action - robot_pos_deg)
+                    print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}°, Pred_time={pred_time*1000:.1f}ms")
+                    print(f"  Policy Action (deg): {predicted_action}")
+                    print(f"  GT Action (deg):     {gt_action}")
+                    print(f"  Robot Pos (deg):     {robot_pos_deg}")
+                    print(f"  Robot Pos (rad):     {simulator.robot_joint_positions}")
+                    print(f"  Action Range:        [{predicted_action.min():.3f}, {predicted_action.max():.3f}]°")
+                    print()
                 
                 # Control simulation speed
                 time.sleep(1.0 / (30 * speed))  # 30 FPS base rate
