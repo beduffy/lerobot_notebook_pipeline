@@ -17,6 +17,9 @@ Key features:
 Usage:
     python simulate_robot_control.py --policy-path ./single_episode_model
     python simulate_robot_control.py --policy-path ./single_episode_model --episode 0 --steps 100
+
+    worked since running matplotlib at same time causes LibGL errors, conflicts:
+    python simulate_robot_control.py --steps 10 --speed 2.0 --no-visualization
 """
 
 import argparse
@@ -46,17 +49,17 @@ class RobotControlSimulator:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
         
         # Load policy
-        print(f"🤖 Loading policy from {policy_path}...")
+        print(f"Loading policy from {policy_path}...")
         self.policy = ACTPolicy.from_pretrained(policy_path)
         self.policy.eval()
         self.policy.to(self.device)
         self.policy.reset()
-        print("✅ Policy loaded!")
+        print("Policy loaded!")
         
         # Load dataset
-        print(f"📦 Loading dataset {dataset_name}...")
+        print(f"Loading dataset {dataset_name}...")
         self.dataset = LeRobotDataset(dataset_name, video_backend="pyav")
-        print("✅ Dataset loaded!")
+        print("Dataset loaded!")
         
         # Get episode data
         self.episode_idx = episode_idx
@@ -86,6 +89,7 @@ class RobotControlSimulator:
         # Initialize MuJoCo if available
         self.mujoco_model = None
         self.mujoco_data = None
+        self.mujoco_joint_indices = None
         if MUJOCO_AVAILABLE:
             self._setup_mujoco()
         
@@ -99,66 +103,36 @@ class RobotControlSimulator:
         print(f"📏 Episode {self.episode_idx}: {self.episode_length} steps")
         
     def _setup_mujoco(self):
-        """Setup MuJoCo simulation if available."""
+        """Setup MuJoCo simulation using existing SO101 arm."""
         try:
-            # Create a simple 6-DOF arm model
-            xml_string = """
-            <mujoco model="simple_arm">
-                <option timestep="0.01"/>
-                <worldbody>
-                    <light pos="0 0 3" dir="0 0 -1"/>
-                    <geom type="plane" size="2 2 0.1" rgba="0.8 0.8 0.8 1"/>
-                    
-                    <body name="base" pos="0 0 0.1">
-                        <geom type="cylinder" size="0.05 0.1" rgba="0.7 0.7 0.7 1"/>
-                        <joint name="joint1" type="hinge" axis="0 0 1" range="-180 180"/>
-                        
-                        <body name="link1" pos="0 0 0.2" euler="0 0 0">
-                            <geom type="box" size="0.03 0.03 0.1" rgba="0.8 0.3 0.3 1"/>
-                            <joint name="joint2" type="hinge" axis="0 1 0" range="-90 90"/>
-                            
-                            <body name="link2" pos="0 0 0.2" euler="0 0 0">
-                                <geom type="box" size="0.03 0.03 0.1" rgba="0.3 0.8 0.3 1"/>
-                                <joint name="joint3" type="hinge" axis="0 1 0" range="-90 90"/>
-                                
-                                <body name="link3" pos="0 0 0.2" euler="0 0 0">
-                                    <geom type="box" size="0.03 0.03 0.1" rgba="0.3 0.3 0.8 1"/>
-                                    <joint name="joint4" type="hinge" axis="1 0 0" range="-90 90"/>
-                                    
-                                    <body name="link4" pos="0 0 0.15" euler="0 0 0">
-                                        <geom type="box" size="0.02 0.02 0.08" rgba="0.8 0.8 0.3 1"/>
-                                        <joint name="joint5" type="hinge" axis="0 1 0" range="-90 90"/>
-                                        
-                                        <body name="end_effector" pos="0 0 0.1" euler="0 0 0">
-                                            <geom type="box" size="0.02 0.02 0.05" rgba="0.8 0.3 0.8 1"/>
-                                            <joint name="joint6" type="hinge" axis="0 0 1" range="-180 180"/>
-                                        </body>
-                                    </body>
-                                </body>
-                            </body>
-                        </body>
-                    </body>
-                </worldbody>
-                
-                <actuator>
-                    <position joint="joint1" name="actuator1"/>
-                    <position joint="joint2" name="actuator2"/>
-                    <position joint="joint3" name="actuator3"/>
-                    <position joint="joint4" name="actuator4"/>
-                    <position joint="joint5" name="actuator5"/>
-                    <position joint="joint6" name="actuator6"/>
-                </actuator>
-            </mujoco>
-            """
+            # Use the existing SO101 arm XML file
+            xml_path = "lerobot_some_original_code/standalone_scene.xml"
             
-            self.mujoco_model = mujoco.MjModel.from_xml_string(xml_string)
+            self.mujoco_model = mujoco.MjModel.from_xml_path(xml_path)
             self.mujoco_data = mujoco.MjData(self.mujoco_model)
-            print("✅ MuJoCo robot simulation initialized!")
+            
+            # Map Mujoco joint names (same as teleoperate_sim_aditya.py)
+            mujoco_joint_names = [self.mujoco_model.joint(i).name for i in range(self.mujoco_model.njnt)]
+            print(f"MuJoCo joint names: {mujoco_joint_names}")
+            
+            # Map joint indices for joints "1" through "6"
+            try:
+                self.mujoco_joint_indices = [mujoco_joint_names.index(str(i)) for i in range(1, 7)]
+                print(f"Joint indices: {self.mujoco_joint_indices}")
+            except ValueError as e:
+                print(f"⚠️  Could not find all joints 1-6: {e}")
+                # Fallback to first 6 joints
+                self.mujoco_joint_indices = list(range(min(6, self.mujoco_model.njnt)))
+                print(f"Using fallback indices: {self.mujoco_joint_indices}")
+            
+            print("MuJoCo SO101 arm simulation initialized!")
             
         except Exception as e:
             print(f"⚠️  MuJoCo setup failed: {e}")
+            print(f"   Make sure {xml_path} exists")
             self.mujoco_model = None
             self.mujoco_data = None
+            self.mujoco_joint_indices = None
     
     def get_policy_action_and_apply(self):
         """Get policy action from real image and apply to robot."""
@@ -205,26 +179,43 @@ class RobotControlSimulator:
         return sample[self.image_key], predicted_action, gt_action, prediction_time
     
     def _apply_action_to_robot(self, action):
-        """Apply predicted action to robot (both MuJoCo and internal state)."""
-        # Clip actions to reasonable ranges
-        action = np.clip(action, -np.pi, np.pi)
-        
+        """Apply predicted action to robot (following teleoperate_sim_aditya.py approach)."""
         # Apply to MuJoCo if available
-        if self.mujoco_model is not None and self.mujoco_data is not None:
-            # Set joint targets
-            self.mujoco_data.ctrl[:] = action
+        if self.mujoco_model is not None and self.mujoco_data is not None and hasattr(self, 'mujoco_joint_indices'):
+            # Convert actions from radians to degrees (policy outputs radians, MuJoCo expects degrees)
+            joint_values_deg = np.rad2deg(action[:6])  # Take first 6 joints
+            
+            # Convert back to radians for MuJoCo (following teleoperate_sim_aditya.py)
+            joint_values_rad = np.deg2rad(joint_values_deg)
+            
+            # Set joint positions using the mapped indices
+            for idx, val in zip(self.mujoco_joint_indices, joint_values_rad):
+                if idx < len(self.mujoco_data.qpos):
+                    self.mujoco_data.qpos[idx] = val
+            
+            # Step the simulation
             mujoco.mj_step(self.mujoco_model, self.mujoco_data)
             
             # Get actual joint positions and velocities
-            self.robot_joint_positions = self.mujoco_data.qpos[:6].copy()
-            self.joint_velocities = self.mujoco_data.qvel[:6].copy()
+            actual_positions = []
+            actual_velocities = []
+            for idx in self.mujoco_joint_indices:
+                if idx < len(self.mujoco_data.qpos):
+                    actual_positions.append(self.mujoco_data.qpos[idx])
+                    actual_velocities.append(self.mujoco_data.qvel[idx] if idx < len(self.mujoco_data.qvel) else 0.0)
+                else:
+                    actual_positions.append(0.0)
+                    actual_velocities.append(0.0)
+            
+            self.robot_joint_positions = np.array(actual_positions)
+            self.joint_velocities = np.array(actual_velocities)
         else:
             # Simple kinematic simulation without MuJoCo
             dt = 0.01  # 100 Hz
             max_velocity = 2.0  # rad/s
             
             # Calculate desired velocity toward target
-            position_error = action - self.robot_joint_positions
+            position_error = action[:6] - self.robot_joint_positions
             desired_velocity = np.clip(position_error * 5.0, -max_velocity, max_velocity)
             
             # Update positions
@@ -365,24 +356,24 @@ class RobotControlVisualizer:
             avg_smoothness = np.mean(action_changes)
             avg_tracking = np.mean(tracking_errors)
             
-            # Assessment text
-            assessment = "🤖 ROBOT CONTROL ASSESSMENT\n\n"
+            # Assessment text (avoiding emoji for font compatibility)
+            assessment = "ROBOT CONTROL ASSESSMENT\n\n"
             
             if avg_smoothness < 0.1:
-                assessment += "✅ Very smooth control - minimal action changes\n"
+                assessment += "[EXCELLENT] Very smooth control - minimal action changes\n"
             elif avg_smoothness < 0.5:
-                assessment += "✅ Reasonably smooth control\n"
+                assessment += "[GOOD] Reasonably smooth control\n"
             elif avg_smoothness < 1.0:
-                assessment += "⚠️  Somewhat shaky control - noticeable action jumps\n"
+                assessment += "[WARNING] Somewhat shaky control - noticeable action jumps\n"
             else:
-                assessment += "❌ Very shaky control - large action changes\n"
+                assessment += "[POOR] Very shaky control - large action changes\n"
             
             if avg_tracking < 0.1:
-                assessment += "✅ Excellent tracking - robot follows commands well\n"
+                assessment += "[EXCELLENT] Excellent tracking - robot follows commands well\n"
             elif avg_tracking < 0.5:
-                assessment += "✅ Good tracking performance\n"
+                assessment += "[GOOD] Good tracking performance\n"
             else:
-                assessment += "⚠️  Poor tracking - robot struggles to follow commands\n"
+                assessment += "[WARNING] Poor tracking - robot struggles to follow commands\n"
             
             assessment += f"\nMetrics:\n"
             assessment += f"• Average Control Smoothness: {avg_smoothness:.4f}\n"
@@ -460,44 +451,57 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0,
     if visualize:
         visualizer = RobotControlVisualizer()
     
-    if simulator.mujoco_model is not None and MUJOCO_AVAILABLE:
-        try:
-            mujoco_viewer = mujoco.viewer.launch_passive(simulator.mujoco_model, simulator.mujoco_data)
-            print("🎮 MuJoCo viewer launched! You can see the robot moving.")
-        except Exception as e:
-            print(f"⚠️  MuJoCo viewer failed: {e}")
-            mujoco_viewer = None
-    
     print(f"\n🏃 Starting robot control simulation...")
     print("Press Ctrl+C to stop")
     print()
     
     try:
-        for step in range(max_steps):
-            # Get policy action and apply to robot
-            image, predicted_action, gt_action, pred_time = simulator.get_policy_action_and_apply()
-            
-            # Update visualizations
-            if visualizer:
-                visualizer.update(predicted_action, simulator.robot_joint_positions, simulator.joint_velocities)
-            
-            if mujoco_viewer is not None:
-                mujoco_viewer.sync()
-            
-            # Print progress
-            if step % 10 == 0:
-                tracking_error = np.linalg.norm(predicted_action - simulator.robot_joint_positions)
-                print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}, Pred_time={pred_time*1000:.1f}ms")
-            
-            # Control simulation speed
-            time.sleep(1.0 / (30 * speed))  # 30 FPS base rate
+        # Use MuJoCo viewer context manager (same as teleoperate_sim_aditya.py)
+        if simulator.mujoco_model is not None and MUJOCO_AVAILABLE:
+            with mujoco.viewer.launch_passive(simulator.mujoco_model, simulator.mujoco_data) as viewer:
+                print("MuJoCo viewer launched! You can see the robot moving.")
+                
+                for step in range(max_steps):
+                    if not viewer.is_running():
+                        break
+                        
+                    # Get policy action and apply to robot
+                    image, predicted_action, gt_action, pred_time = simulator.get_policy_action_and_apply()
+                    
+                    # Update visualizations
+                    if visualizer:
+                        visualizer.update(predicted_action, simulator.robot_joint_positions, simulator.joint_velocities)
+                    
+                    # Sync MuJoCo viewer
+                    viewer.sync()
+                    
+                    # Print progress
+                    if step % 10 == 0:
+                        tracking_error = np.linalg.norm(predicted_action - simulator.robot_joint_positions)
+                        print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}, Pred_time={pred_time*1000:.1f}ms")
+                    
+                    # Control simulation speed
+                    time.sleep(1.0 / (30 * speed))  # 30 FPS base rate
+        else:
+            # No MuJoCo viewer, just run simulation
+            for step in range(max_steps):
+                # Get policy action and apply to robot
+                image, predicted_action, gt_action, pred_time = simulator.get_policy_action_and_apply()
+                
+                # Update visualizations
+                if visualizer:
+                    visualizer.update(predicted_action, simulator.robot_joint_positions, simulator.joint_velocities)
+                
+                # Print progress
+                if step % 10 == 0:
+                    tracking_error = np.linalg.norm(predicted_action - simulator.robot_joint_positions)
+                    print(f"Step {step:3d}: Tracking_Error={tracking_error:.4f}, Pred_time={pred_time*1000:.1f}ms")
+                
+                # Control simulation speed
+                time.sleep(1.0 / (30 * speed))  # 30 FPS base rate
     
     except KeyboardInterrupt:
         print("\n🛑 Simulation stopped by user")
-    
-    finally:
-        if mujoco_viewer is not None:
-            mujoco_viewer.close()
     
     # Analyze results
     print("\n📊 Robot Control Analysis:")
