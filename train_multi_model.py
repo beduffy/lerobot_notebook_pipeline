@@ -271,23 +271,51 @@ def setup_act_policy(input_features, output_features, metadata):
 
 
 def setup_diffusion_policy(input_features, output_features, metadata):
-    """Setup Diffusion Policy with working configuration."""
+    """Setup Diffusion Policy with original LeRobot configuration."""
     print(f"🌊 Setting up Diffusion Policy...")
     
     config = DiffusionConfig(
         input_features=input_features,
         output_features=output_features,
-        # Working Diffusion settings
+        # Original LeRobot Diffusion settings
+        n_obs_steps=2,
         horizon=16,
         n_action_steps=8,
-        num_inference_steps=10,
+        vision_backbone="resnet18",
+        crop_shape=(84, 84),
+        crop_is_random=True,
+        pretrained_backbone_weights=None,
+        use_group_norm=True,
+        spatial_softmax_num_keypoints=32,
+        down_dims=(512, 1024, 2048),
+        kernel_size=5,
+        n_groups=8,
+        diffusion_step_embed_dim=128,
+        use_film_scale_modulation=True,
+        noise_scheduler_type="DDPM",
+        num_train_timesteps=100,
+        beta_schedule="squaredcos_cap_v2",
+        beta_start=0.0001,
+        beta_end=0.02,
+        prediction_type="epsilon",
+        clip_sample=True,
+        clip_sample_range=1.0,
+        num_inference_steps=10,  # For faster inference during eval
+        do_mask_loss_for_padding=False,
+        # Training presets
+        optimizer_lr=1e-4,
+        optimizer_betas=(0.95, 0.999),
+        optimizer_eps=1e-8,
+        optimizer_weight_decay=1e-6,
     )
     
     policy = DiffusionPolicy(config, dataset_stats=metadata.stats)
     
-    print(f"   ✅ Diffusion configured")
+    print(f"   ✅ Diffusion configured with original LeRobot settings")
     print(f"   Horizon: {config.horizon}")
     print(f"   Action steps: {config.n_action_steps}")
+    print(f"   Backbone: {config.vision_backbone}")
+    print(f"   Training timesteps: {config.num_train_timesteps}")
     print(f"   Parameters: {sum(p.numel() for p in policy.parameters()):,}")
     
     return policy, config
@@ -438,10 +466,10 @@ def get_optimizer_config(model_type: str, config):
             'weight_decay': config.optimizer_weight_decay,
         }
     elif model_type == "diffusion":
-        # Diffusion typically uses different learning rates
+        # Diffusion uses original LeRobot optimizer settings
         return {
-            'lr': 1e-4,  # Diffusion often uses higher LR
-            'weight_decay': 1e-4,
+            'lr': config.optimizer_lr,
+            'weight_decay': config.optimizer_weight_decay,
         }
     elif model_type == "vqbet":
         # VQBet settings
