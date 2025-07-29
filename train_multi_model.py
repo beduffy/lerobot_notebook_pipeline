@@ -829,6 +829,35 @@ def save_model(policy, save_dir, model_type, episode_indices, final_loss):
     return save_path
 
 
+def load_checkpoint(checkpoint_path, policy, optimizer, lr_scheduler):
+    """Load checkpoint for resuming training."""
+    print(f"🔄 Loading checkpoint from: {checkpoint_path}")
+    
+    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    
+    # Load model state
+    policy.load_state_dict(checkpoint['model_state_dict'])
+    
+    # Load optimizer state
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    
+    # Load scheduler state
+    lr_scheduler.load_state_dict(checkpoint['lr_scheduler_state_dict'])
+    
+    # Get training info
+    step = checkpoint['step']
+    losses = checkpoint['losses']
+    final_loss = checkpoint['final_loss']
+    training_time = checkpoint['training_time']
+    
+    print(f"   ✅ Checkpoint loaded successfully!")
+    print(f"   Step: {step}")
+    print(f"   Final loss: {final_loss:.6f}")
+    print(f"   Training time: {training_time/60:.1f} minutes")
+    
+    return step, losses, final_loss
+
+
 def plot_training_progress(losses, model_type, save_path=None, show_plot=True, episode_info=None):
     """Plot training loss curve with model info."""
     plt.figure(figsize=(10, 6))
