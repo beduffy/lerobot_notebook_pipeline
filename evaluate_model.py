@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-Simple Model Evaluation Script
+Multi-Model Evaluation Script
 
-Evaluates a trained ACT model on dataset episodes with visualization.
+Evaluates trained models on dataset episodes with visualization.
 
 Usage:
     python evaluate_model.py ./single_episode_model --episode 0
@@ -15,10 +16,38 @@ import torch
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
+import json
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.policies.act.modeling_act import ACTPolicy
 from torch.utils.data import DataLoader, Subset
+
+# Import all model types
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
+
+# Import foundation models (VLAs)
+try:
+    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+    SMOLVLA_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+        SMOLVLA_AVAILABLE = True
+    except ImportError:
+        SMOLVLA_AVAILABLE = False
+
+try:
+    from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+    PI0FAST_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+        PI0FAST_AVAILABLE = True
+    except ImportError:
+        PI0FAST_AVAILABLE = False
 
 
 class EpisodeSampler(torch.utils.data.Sampler):
@@ -42,18 +71,239 @@ def get_episode_indices(dataset, episode_idx):
     return list(range(from_idx, to_idx))
 
 
-def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use_dataloader=True):
+def detect_model_type(model_path):
+    """Detect model type from model directory or checkpoint file."""
+    model_path = Path(model_path)
+    
+    # If it's a checkpoint file, we need to rely on the model_type argument
+    # since we can't easily detect from the checkpoint content
+    if str(model_path).endswith('.pt'):
+        print("   📁 Checkpoint file detected - model type should be specified with --model-type")
+        return None  # Let the caller use the specified model_type
+    
+    # Check for training_info.json first
+    info_path = model_path / "training_info.json"
+    if info_path.exists():
+        try:
+            with open(info_path, 'r') as f:
+                info = json.load(f)
+                if 'model_type' in info:
+                    return info['model_type']
+        except:
+            pass
+    
+    # Check for config.json
+    config_path = model_path / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                # Check for model-specific identifiers
+                if 'model_type' in config:
+                    return config['model_type']
+                elif 'architectures' in config:
+                    arch = config['architectures'][0] if config['architectures'] else ""
+                    if 'ACT' in arch:
+                        return 'act'
+                    elif 'Diffusion' in arch:
+                        return 'diffusion'
+                    elif 'VQBeT' in arch:
+                        return 'vqbet'
+                    elif 'SmolVLA' in arch:
+                        return 'smolvla'
+                    elif 'PI0FAST' in arch:
+                        return 'pi0fast'
+        except:
+            pass
+    
+    # Fallback: try to load each model type and see which one works
+    model_types = ['act', 'diffusion', 'vqbet']
+    if SMOLVLA_AVAILABLE:
+        model_types.append('smolvla')
+    if PI0FAST_AVAILABLE:
+        model_types.append('pi0fast')
+    
+    for model_type in model_types:
+        try:
+            if model_type == 'act':
+                ACTPolicy.from_pretrained(model_path)
+                return 'act'
+            elif model_type == 'diffusion':
+                DiffusionPolicy.from_pretrained(model_path)
+                return 'diffusion'
+            elif model_type == 'vqbet':
+                VQBeTPolicy.from_pretrained(model_path)
+                return 'vqbet'
+            elif model_type == 'smolvla' and SMOLVLA_AVAILABLE:
+                SmolVLAPolicy.from_pretrained(model_path)
+                return 'smolvla'
+            elif model_type == 'pi0fast' and PI0FAST_AVAILABLE:
+                PI0FASTPolicy.from_pretrained(model_path)
+                return 'pi0fast'
+        except:
+            continue
+    
+    # Default to ACT if nothing works
+    print("⚠️  Could not detect model type, defaulting to ACT")
+    return 'act'
+
+
+def load_policy(model_path, model_type, camera_remap=None):
+    """Load policy based on model type."""
+    print(f"🧠 Loading {model_type.upper()} policy from {model_path}...")
+    
+    # Check if this is a checkpoint file
+    if str(model_path).endswith('.pt'):
+        # Load from checkpoint file
+        print(f"   📁 Loading from checkpoint file: {model_path}")
+        
+        # Load checkpoint
+        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+        print(f"   ✅ Loaded checkpoint from step {checkpoint.get('step', 'unknown')}")
+        
+        # Create policy based on model type using direct initialization
+        if model_type == 'act':
+            # For ACT, we need to create with minimal config
+            from lerobot.policies.act.configuration_act import ACTConfig
+            config = ACTConfig()
+            policy = ACTPolicy(config)
+        elif model_type == 'diffusion':
+            # For Diffusion, we need to create with minimal config
+            from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+            config = DiffusionConfig()
+            policy = DiffusionPolicy(config)
+        elif model_type == 'vqbet':
+            # For VQBeT, we need to create with minimal config
+            from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
+            config = VQBeTConfig()
+            policy = VQBeTPolicy(config)
+        elif model_type == 'smolvla':
+            if not SMOLVLA_AVAILABLE:
+                raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+            # For SmolVLA, create with proper config and dataset stats
+            from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+            from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
+            from lerobot.datasets.utils import dataset_to_policy_features
+            
+            # Create proper config with dataset features
+            metadata = LeRobotDatasetMetadata("bearlover365/red_cube_always_in_same_place")
+            features = dataset_to_policy_features(metadata.features)
+            
+            # Apply camera remapping to features if needed
+            if camera_remap:
+                remapped_features = {}
+                for key, value in features.items():
+                    if key in camera_remap:
+                        new_key = camera_remap[key]
+                        remapped_features[new_key] = value
+                    else:
+                        remapped_features[key] = value
+                features = remapped_features
+            
+            config = SmolVLAConfig(
+                input_features=features,
+                output_features={'action': features['action']}
+            )
+            
+            policy = SmolVLAPolicy(config, dataset_stats=metadata.stats)
+        elif model_type == 'pi0fast':
+            if not PI0FAST_AVAILABLE:
+                raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+            # For π0-FAST, create with minimal config
+            from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
+            config = PI0FASTConfig()
+            policy = PI0FASTPolicy(config)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+        
+        # Load state dict with strict=False to ignore normalization buffers
+        if 'model_state_dict' in checkpoint:
+            missing_keys, unexpected_keys = policy.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            print(f"   ✅ Loaded state dict successfully")
+            if missing_keys:
+                print(f"   ⚠️  Missing keys: {missing_keys}")
+            if unexpected_keys:
+                print(f"   ⚠️  Ignored unexpected keys: {unexpected_keys}")
+        else:
+            print("   ⚠️  No model_state_dict found in checkpoint")
+        
+        return policy
+    
+    else:
+        # Load from model directory (original behavior)
+        if model_type == 'act':
+            policy = ACTPolicy.from_pretrained(model_path)
+        elif model_type == 'diffusion':
+            policy = DiffusionPolicy.from_pretrained(model_path)
+        elif model_type == 'vqbet':
+            policy = VQBeTPolicy.from_pretrained(model_path)
+        elif model_type == 'smolvla':
+            if not SMOLVLA_AVAILABLE:
+                raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+            policy = SmolVLAPolicy.from_pretrained(model_path)
+        elif model_type == 'pi0fast':
+            if not PI0FAST_AVAILABLE:
+                raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+            policy = PI0FASTPolicy.from_pretrained(model_path)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+        
+        return policy
+
+
+def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use_dataloader=True, camera_remap=None, model_type=None):
     """Evaluate model on a specific episode and return predictions/ground truth for plotting."""
     print(f"🔬 Evaluating model on episode {episode_idx}...")
     
+    # Detect model type (or use provided one)
+    if model_type is None:
+        detected_type = detect_model_type(model_path)
+        if detected_type is None:
+            print("   ❌ Could not detect model type and none specified. Use --model-type argument.")
+            return None, None, None, None, None, None
+        model_type = detected_type
+    
+    print(f"   Detected model type: {model_type.upper()}")
+    
     # Load model
-    policy = ACTPolicy.from_pretrained(model_path)
+    policy = load_policy(model_path, model_type, camera_remap)
     policy.to(device)
     policy.eval()
     policy.reset()
     
     # Load dataset  
     dataset = LeRobotDataset(dataset_name, video_backend="pyav")
+    
+    # Apply camera remapping if specified
+    if camera_remap:
+        print(f"   📷 Applying camera remapping: {camera_remap}")
+        
+        class CameraRemapDataset(torch.utils.data.Dataset):
+            def __init__(self, dataset, camera_remap):
+                self.dataset = dataset
+                self.camera_remap = camera_remap
+                # Preserve important attributes from the original dataset
+                if hasattr(dataset, 'episode_data_index'):
+                    self.episode_data_index = dataset.episode_data_index
+            
+            def __len__(self):
+                return len(self.dataset)
+            
+            def __getitem__(self, idx):
+                batch = self.dataset[idx]
+                remapped_batch = {}
+                
+                for key, value in batch.items():
+                    if key in self.camera_remap:
+                        # Remap camera keys
+                        new_key = self.camera_remap[key]
+                        remapped_batch[new_key] = value
+                    else:
+                        remapped_batch[key] = value
+                
+                return remapped_batch
+        
+        dataset = CameraRemapDataset(dataset, camera_remap)
     
     if use_dataloader:
         # Use the more robust EpisodeSampler approach
@@ -71,7 +321,6 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use
         
         predictions = []
         ground_truths = []
-        images = []
         
         with torch.no_grad():
             for i, batch in enumerate(test_dataloader):
@@ -81,6 +330,10 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use
                     for key, value in batch.items():
                         if key.startswith("observation.") and isinstance(value, torch.Tensor):
                             inp_batch[key] = value.to(device)
+                    
+                    # Add language task for VLA models (SmolVLA, π0-FAST)
+                    if model_type in ["smolvla", "pi0fast"]:
+                        inp_batch["task"] = "grab red cube and put to left"
                     
                     # Get prediction
                     pred_action_chunk = policy.select_action(inp_batch)
@@ -115,19 +368,79 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use
         episode_indices = get_episode_indices(dataset, episode_idx)
         print(f"   Episode {episode_idx}: {len(episode_indices)} steps")
         
+        # Debug: Check policy configuration before the loop
+        print(f"   🔍 Policy input features: {list(policy.config.input_features.keys())}")
+        image_features = {k: v for k, v in policy.config.input_features.items() if 'image' in k.lower()}
+        print(f"   📷 Policy expects image features: {list(image_features.keys())}")
+        
         predictions = []
         ground_truths = []
         
         with torch.no_grad():
-            for idx in episode_indices:
+            for i, idx in enumerate(episode_indices):
                 try:
                     sample = dataset[idx]
+                    
+                    # Debug: Print available keys in sample
+                    if i == 0:
+                        print(f"   🔍 Available keys in sample: {list(sample.keys())}")
+                        image_keys = [k for k in sample.keys() if 'image' in k.lower()]
+                        print(f"   📷 Image keys found: {image_keys}")
+                        
+                        # Debug: Check what the policy expects
+                        print(f"   🔍 Policy input features: {list(policy.config.input_features.keys())}")
+                        image_features = {k: v for k, v in policy.config.input_features.items() if 'image' in k.lower()}
+                        print(f"   📷 Policy expects image features: {list(image_features.keys())}")
                     
                     # Prepare input - ONLY OBSERVATIONS FOR INFERENCE
                     batch = {}
                     for key, value in sample.items():
                         if key.startswith("observation.") and isinstance(value, torch.Tensor):
-                            batch[key] = value.unsqueeze(0).to(device)
+                            # For SmolVLA, ensure images are properly formatted
+                            if "image" in key.lower() and value.dim() == 3:
+                                # Ensure image is in correct format [C, H, W]
+                                if value.shape[0] == 3:  # Already [C, H, W]
+                                    batch[key] = value.unsqueeze(0).to(device)
+                                else:  # Assume [H, W, C] and transpose
+                                    batch[key] = value.permute(2, 0, 1).unsqueeze(0).to(device)
+                            else:
+                                batch[key] = value.unsqueeze(0).to(device)
+                    
+                    # Debug: Print what we're sending to the model
+                    if i == 0:
+                        print(f"   📤 Sending to model: {list(batch.keys())}")
+                        # Check image shapes
+                        for k, v in batch.items():
+                            if "image" in k.lower():
+                                print(f"      {k}: shape {v.shape}, dtype {v.dtype}")
+                        
+                        # Debug: Check what the policy expects
+                        print(f"   🔍 Policy input features: {list(policy.config.input_features.keys())}")
+                        image_features = {k: v for k, v in policy.config.input_features.items() if 'image' in k.lower()}
+                        print(f"   📷 Policy expects image features: {list(image_features.keys())}")
+                    
+                    # Add language task for VLA models (SmolVLA, π0-FAST)
+                    if model_type in ["smolvla", "pi0fast"]:
+                        batch["task"] = "grab red cube and put to left"
+                    
+                    # Debug: Check if we have the expected image features
+                    if i == 0:
+                        expected_image_keys = [k for k in policy.config.input_features.keys() if 'image' in k.lower()]
+                        actual_image_keys = [k for k in batch.keys() if 'image' in k.lower()]
+                        print(f"   🔍 Expected image keys: {expected_image_keys}")
+                        print(f"   📤 Actual image keys: {actual_image_keys}")
+                        
+                        # If we don't have the expected keys, try to map them
+                        if expected_image_keys and not any(k in batch for k in expected_image_keys):
+                            print(f"   ⚠️  Missing expected image keys, attempting to map...")
+                            # Try to map our image key to the expected one
+                            for expected_key in expected_image_keys:
+                                if 'wrist' in expected_key.lower():
+                                    # Map our wrist image to the expected key
+                                    if 'observation.images.wrist' in batch:
+                                        batch[expected_key] = batch['observation.images.wrist']
+                                        print(f"      Mapped observation.images.wrist -> {expected_key}")
+                                        break
                     
                     # Get prediction
                     pred_action_chunk = policy.select_action(batch)
@@ -190,7 +503,7 @@ def evaluate_model_on_episode(model_path, dataset_name, episode_idx, device, use
         return None, None, None, None, None, None
 
 
-def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, episode_idx, save_plots=False, output_dir="./plots"):
+def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, episode_idx, model_type, save_plots=False, output_dir="./plots"):
     """Create detailed plots comparing predictions vs ground truth."""
     print(f"📈 Creating plots for episode {episode_idx}...")
     
@@ -224,11 +537,11 @@ def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, ep
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
     plt.tight_layout()
-    plt.suptitle(f'🎯 Model Performance: Predicted vs Ground Truth Actions (Episode {episode_idx})', 
+    plt.suptitle(f'🎯 {model_type.upper()} Model Performance: Predicted vs Ground Truth Actions (Episode {episode_idx})', 
                  fontsize=16, y=1.02)
     
     if save_plots:
-        plot_path = Path(output_dir) / f"episode_{episode_idx}_predictions.png"
+        plot_path = Path(output_dir) / f"{model_type}_episode_{episode_idx}_predictions.png"
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         print(f"   💾 Saved plot to: {plot_path}")
     
@@ -241,7 +554,7 @@ def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, ep
     per_step_error = torch.mean(torch.abs(predictions - ground_truths), dim=1).cpu().numpy()
     
     ax.plot(per_step_error, linewidth=2, color='orange')
-    ax.set_title(f'Per-Timestep Mean Absolute Error (Episode {episode_idx})')
+    ax.set_title(f'Per-Timestep Mean Absolute Error - {model_type.upper()} (Episode {episode_idx})')
     ax.set_xlabel('Time Step')
     ax.set_ylabel('Mean Absolute Error')
     ax.grid(True, alpha=0.3)
@@ -252,7 +565,7 @@ def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, ep
     ax.legend()
     
     if save_plots:
-        error_plot_path = Path(output_dir) / f"episode_{episode_idx}_error_over_time.png"
+        error_plot_path = Path(output_dir) / f"{model_type}_episode_{episode_idx}_error_over_time.png"
         plt.savefig(error_plot_path, dpi=300, bbox_inches='tight')
         print(f"   💾 Saved error plot to: {error_plot_path}")
     
@@ -268,17 +581,17 @@ def plot_predictions_vs_ground_truth(predictions, ground_truths, joint_names, ep
     print(f"   Worst performing joint: {joint_names[worst_joint_idx]}")
 
     if overall_mae < 0.01:
-        print(f"\n🎉 Excellent! The model has learned the demonstration very well.")
+        print(f"\n🎉 Excellent! The {model_type.upper()} model has learned the demonstration very well.")
         print(f"   Next steps: Collect more diverse demonstrations for better generalization!")
     elif overall_mae < 0.1:
-        print(f"\n✅ Good performance! The model learned the general trajectory well.")
+        print(f"\n✅ Good performance! The {model_type.upper()} model learned the general trajectory well.")
     else:
         print(f"\n🔧 Consider: More training steps, different learning rate, or data quality issues.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate trained ACT model")
-    parser.add_argument("model_path", help="Path to trained model directory")
+    parser = argparse.ArgumentParser(description="Evaluate trained model (supports both model directories and checkpoint files)")
+    parser.add_argument("model_path", help="Path to trained model directory or checkpoint file (.pt)")
     parser.add_argument("--dataset", default="bearlover365/red_cube_always_in_same_place")
     parser.add_argument("--episode", type=int, default=0, help="Episode to evaluate on")
     parser.add_argument("--compare-episodes", help="Comma-separated episode indices to compare")
@@ -286,8 +599,22 @@ def main():
     parser.add_argument("--save-plots", action="store_true", help="Save plots to disk")
     parser.add_argument("--output-dir", default="./plots", help="Directory to save plots")
     parser.add_argument("--use-simple-loader", action="store_true", help="Use simple data loading instead of DataLoader")
+    parser.add_argument("--camera-remap", type=str, default=None,
+                       help="Camera remapping (e.g., 'observation.images.front:observation.images.wrist')")
+    parser.add_argument("--model-type", type=str, default=None, 
+                       help="Force model type (act, diffusion, vqbet, smolvla, pi0fast). Auto-detected if not specified.")
     
     args = parser.parse_args()
+    
+    # Parse camera remapping
+    camera_remap = None
+    if args.camera_remap:
+        camera_remap = {}
+        for mapping in args.camera_remap.split(','):
+            if ':' in mapping:
+                old_key, new_key = mapping.strip().split(':')
+                camera_remap[old_key.strip()] = new_key.strip()
+        print(f"📷 Camera remapping: {camera_remap}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🖥️  Device: {device}")
@@ -298,16 +625,21 @@ def main():
         print(f"❌ Model path does not exist: {args.model_path}")
         return 1
     
+    # Detect or use specified model type
+    model_type = args.model_type if args.model_type else detect_model_type(args.model_path)
+    print(f"🧠 Model type: {model_type.upper()}")
+    
     try:
         if args.compare_episodes:
             # Compare performance across multiple episodes
             episodes = [int(x.strip()) for x in args.compare_episodes.split(",")]
-            print(f"\n🔄 Comparing performance across episodes: {episodes}")
+            print(f"\n🔄 Comparing {model_type.upper()} performance across episodes: {episodes}")
             
             results = {}
             for ep in episodes:
                 mae, mse, max_err, predictions, ground_truths, joint_names = evaluate_model_on_episode(
-                    args.model_path, args.dataset, ep, device, use_dataloader=not args.use_simple_loader
+                    args.model_path, args.dataset, ep, device, 
+                    use_dataloader=not args.use_simple_loader, camera_remap=camera_remap, model_type=model_type
                 )
                 if mae is not None:
                     results[ep] = {"mae": mae, "mse": mse, "max_error": max_err}
@@ -315,7 +647,7 @@ def main():
                     # Plot if requested
                     if args.plot and predictions is not None:
                         plot_predictions_vs_ground_truth(
-                            predictions, ground_truths, joint_names, ep, 
+                            predictions, ground_truths, joint_names, ep, model_type,
                             save_plots=args.save_plots, output_dir=args.output_dir
                         )
             
@@ -340,13 +672,14 @@ def main():
         else:
             # Single episode evaluation
             mae, mse, max_err, predictions, ground_truths, joint_names = evaluate_model_on_episode(
-                args.model_path, args.dataset, args.episode, device, use_dataloader=not args.use_simple_loader
+                args.model_path, args.dataset, args.episode, device, 
+                use_dataloader=not args.use_simple_loader, camera_remap=camera_remap, model_type=model_type
             )
             
             # Plot if requested and we have data
             if args.plot and predictions is not None:
                 plot_predictions_vs_ground_truth(
-                    predictions, ground_truths, joint_names, args.episode,
+                    predictions, ground_truths, joint_names, args.episode, model_type,
                     save_plots=args.save_plots, output_dir=args.output_dir
                 )
         
