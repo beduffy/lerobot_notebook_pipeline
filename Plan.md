@@ -110,16 +110,7 @@ python train_multi_model.py --model smolvla --dataset bearlover365/red_cube_alwa
 
 **🎯 RESULTS: 5/6 models working! Foundation VLA breakthrough achieved!**
 
-smol vla updt_s:0.793 x 200 = 158.6 per 200 steps
-
-huggingface-cli upload ${HF_USER}/pick_up_white_sock_smolvla_finetune outputs/train/pick_up_white_sock_smolvla_finetune/checkpoints/last --repo-type=model
-
-
-think it needs pretrained
-huggingface-cli upload \
-      ${HF_USER}/pick_up_white_sock_smolvla_finetune \
-      outputs/train/pick_up_white_sock_smolvla_finetune/checkpoints/last/pretrained_model \
-      --repo-type=model
+smol vla training speed updt_s:0.793 x 200 = 158.6 per 200 steps
 
 
 # document
@@ -152,7 +143,7 @@ conda activate robosuite
 
 
 
-# Other todos
+# Other TODOs
 TODO obviously the coolest goal of all would be to get some zero shot VLA to work! pizero over network or smolVLA. with fine tuning if needed but that defeats the entire purpose of VLA to me.
 
 
