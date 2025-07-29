@@ -22,16 +22,16 @@ try:
     print(f"✓ pandas imported successfully (version: {pd.__version__})")
     
     print("\nTesting lerobot imports...")
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
     print("✓ LeRobotDataset imported successfully")
     
-    from lerobot.common.datasets.utils import dataset_to_policy_features
+    from lerobot.datasets.utils import dataset_to_policy_features
     print("✓ dataset_to_policy_features imported successfully")
     
-    from lerobot.common.policies.act.configuration_act import ACTConfig
+    from lerobot.policies.act.configuration_act import ACTConfig
     print("✓ ACTConfig imported successfully")
     
-    from lerobot.common.policies.act.modeling_act import ACTPolicy
+    from lerobot.policies.act.modeling_act import ACTPolicy
     print("✓ ACTPolicy imported successfully")
     
     from lerobot.configs.types import FeatureType

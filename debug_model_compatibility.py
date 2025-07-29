@@ -7,8 +7,8 @@ This script helps diagnose why the trained model is failing with tensor dimensio
 """
 
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.policies.act.modeling_act import ACTPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.policies.act.modeling_act import ACTPolicy
 import json
 
 

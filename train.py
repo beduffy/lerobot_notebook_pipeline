@@ -14,12 +14,12 @@ Usage:
 import argparse
 import torch
 import warnings
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from lerobot.common.policies.act.modeling_act import ACTPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.configs.types import FeatureType
-from lerobot.common.datasets.factory import resolve_delta_timestamps
+from lerobot.datasets.factory import resolve_delta_timestamps
 from lerobot_notebook_pipeline.dataset_utils.training import train_model
 from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise
 from torchvision import transforms

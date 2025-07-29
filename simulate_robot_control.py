@@ -38,8 +38,8 @@ except ImportError:
     print("⚠️  MuJoCo not available - will use matplotlib-only visualization")
     MUJOCO_AVAILABLE = False
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.policies.act.modeling_act import ACTPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.policies.act.modeling_act import ACTPolicy
 
 
 class RobotControlSimulator:
