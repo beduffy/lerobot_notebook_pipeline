@@ -29,6 +29,7 @@ import torch
 import matplotlib.pyplot as plt
 from collections import deque
 from pathlib import Path
+import json
 
 try:
     import mujoco
@@ -39,18 +40,144 @@ except ImportError:
     MUJOCO_AVAILABLE = False
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+# Import all model types
 from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
+
+# Import foundation models (VLAs)
+try:
+    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+    SMOLVLA_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+        SMOLVLA_AVAILABLE = True
+    except ImportError:
+        SMOLVLA_AVAILABLE = False
+
+try:
+    from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+    PI0FAST_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+        PI0FAST_AVAILABLE = True
+    except ImportError:
+        PI0FAST_AVAILABLE = False
+
+
+def detect_model_type(model_path):
+    """Detect model type from model directory."""
+    model_path = Path(model_path)
+    
+    # Check for training_info.json first
+    info_path = model_path / "training_info.json"
+    if info_path.exists():
+        try:
+            with open(info_path, 'r') as f:
+                info = json.load(f)
+                if 'model_type' in info:
+                    return info['model_type']
+        except:
+            pass
+    
+    # Check for config.json
+    config_path = model_path / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                # Check for model-specific identifiers
+                if 'model_type' in config:
+                    return config['model_type']
+                elif 'architectures' in config:
+                    arch = config['architectures'][0] if config['architectures'] else ""
+                    if 'ACT' in arch:
+                        return 'act'
+                    elif 'Diffusion' in arch:
+                        return 'diffusion'
+                    elif 'VQBeT' in arch:
+                        return 'vqbet'
+                    elif 'SmolVLA' in arch:
+                        return 'smolvla'
+                    elif 'PI0FAST' in arch:
+                        return 'pi0fast'
+        except:
+            pass
+    
+    # Fallback: try to load each model type and see which one works
+    model_types = ['act', 'diffusion', 'vqbet']
+    if SMOLVLA_AVAILABLE:
+        model_types.append('smolvla')
+    if PI0FAST_AVAILABLE:
+        model_types.append('pi0fast')
+    
+    for model_type in model_types:
+        try:
+            if model_type == 'act':
+                ACTPolicy.from_pretrained(model_path)
+                return 'act'
+            elif model_type == 'diffusion':
+                DiffusionPolicy.from_pretrained(model_path)
+                return 'diffusion'
+            elif model_type == 'vqbet':
+                VQBeTPolicy.from_pretrained(model_path)
+                return 'vqbet'
+            elif model_type == 'smolvla' and SMOLVLA_AVAILABLE:
+                SmolVLAPolicy.from_pretrained(model_path)
+                return 'smolvla'
+            elif model_type == 'pi0fast' and PI0FAST_AVAILABLE:
+                PI0FASTPolicy.from_pretrained(model_path)
+                return 'pi0fast'
+        except:
+            continue
+    
+    # Default to ACT if nothing works
+    print("⚠️  Could not detect model type, defaulting to ACT")
+    return 'act'
+
+
+def load_policy(model_path, model_type):
+    """Load policy based on model type."""
+    print(f"🧠 Loading {model_type.upper()} policy from {model_path}...")
+    
+    if model_type == 'act':
+        policy = ACTPolicy.from_pretrained(model_path)
+    elif model_type == 'diffusion':
+        policy = DiffusionPolicy.from_pretrained(model_path)
+    elif model_type == 'vqbet':
+        policy = VQBeTPolicy.from_pretrained(model_path)
+    elif model_type == 'smolvla':
+        if not SMOLVLA_AVAILABLE:
+            raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+        policy = SmolVLAPolicy.from_pretrained(model_path)
+    elif model_type == 'pi0fast':
+        if not PI0FAST_AVAILABLE:
+            raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+        policy = PI0FASTPolicy.from_pretrained(model_path)
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+    
+    return policy
 
 
 class RobotControlSimulator:
     """Simulates robot control with real images and policy predictions."""
     
-    def __init__(self, policy_path, dataset_name, episode_idx=0, start_step=0, device="auto"):
+    def __init__(self, policy_path, dataset_name, episode_idx=0, start_step=0, device="auto", camera_remap=None):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+        
+        # Detect model type
+        self.model_type = detect_model_type(policy_path)
+        print(f"   Detected model type: {self.model_type.upper()}")
         
         # Load policy
         print(f"Loading policy from {policy_path}...")
-        self.policy = ACTPolicy.from_pretrained(policy_path)
+        self.policy = load_policy(policy_path, self.model_type)
         self.policy.eval()
         self.policy.to(self.device)
         self.policy.reset()
@@ -60,6 +187,35 @@ class RobotControlSimulator:
         print(f"Loading dataset {dataset_name}...")
         self.dataset = LeRobotDataset(dataset_name, video_backend="pyav")
         print("Dataset loaded!")
+        
+        # Apply camera remapping if specified
+        self.camera_remap = camera_remap
+        if camera_remap:
+            print(f"   📷 Applying camera remapping: {camera_remap}")
+            
+            class CameraRemapDataset(torch.utils.data.Dataset):
+                def __init__(self, dataset, camera_remap):
+                    self.dataset = dataset
+                    self.camera_remap = camera_remap
+                
+                def __len__(self):
+                    return len(self.dataset)
+                
+                def __getitem__(self, idx):
+                    batch = self.dataset[idx]
+                    remapped_batch = {}
+                    
+                    for key, value in batch.items():
+                        if key in self.camera_remap:
+                            # Remap camera keys
+                            new_key = self.camera_remap[key]
+                            remapped_batch[new_key] = value
+                        else:
+                            remapped_batch[key] = value
+                    
+                    return remapped_batch
+            
+            self.dataset = CameraRemapDataset(self.dataset, camera_remap)
         
         # Get episode data
         self.episode_idx = episode_idx
@@ -149,6 +305,10 @@ class RobotControlSimulator:
         for key, value in sample.items():
             if key.startswith("observation.") and isinstance(value, torch.Tensor):
                 batch[key] = value.unsqueeze(0).to(self.device)
+        
+        # Add language task for VLA models (SmolVLA, π0-FAST)
+        if self.model_type in ["smolvla", "pi0fast"]:
+            batch["task"] = "grab red cube and put to left"
         
         # Get policy prediction
         start_time = time.time()
@@ -424,7 +584,7 @@ def analyze_control_performance(action_history, position_history, velocity_histo
 
 
 def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, start_step=0,
-                                max_steps=100, speed=1.0, visualize=True, use_mujoco=True):
+                                max_steps=100, speed=1.0, visualize=True, use_mujoco=True, camera_remap=None):
     """Main robot control simulation loop."""
     
     print("🤖 Robot Control Simulation")
@@ -439,7 +599,7 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, start
     print()
     
     # Initialize simulator
-    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx, start_step)
+    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx, start_step, camera_remap=camera_remap)
     
     if not use_mujoco:
         simulator.mujoco_model = None
@@ -584,8 +744,22 @@ def main():
                        help='Disable MuJoCo physics simulation')
     parser.add_argument('--device', type=str, default='auto',
                        help='Device to use (cuda/cpu/auto)')
+    parser.add_argument('--camera-remap', type=str, default=None,
+                       help="Camera remapping (e.g., 'observation.images.front:observation.images.wrist')")
+    parser.add_argument('--model-type', type=str, default=None, 
+                       help="Force model type (act, diffusion, vqbet, smolvla, pi0fast). Auto-detected if not specified.")
     
     args = parser.parse_args()
+    
+    # Parse camera remapping
+    camera_remap = None
+    if args.camera_remap:
+        camera_remap = {}
+        for mapping in args.camera_remap.split(','):
+            if ':' in mapping:
+                old_key, new_key = mapping.strip().split(':')
+                camera_remap[old_key.strip()] = new_key.strip()
+        print(f"📷 Camera remapping: {camera_remap}")
     
     if not Path(args.policy_path).exists():
         print(f"❌ Policy path does not exist: {args.policy_path}")
@@ -600,7 +774,8 @@ def main():
             max_steps=args.steps,
             speed=args.speed,
             visualize=not args.no_visualization,
-            use_mujoco=not args.no_mujoco
+            use_mujoco=not args.no_mujoco,
+            camera_remap=camera_remap
         )
         return 0
     
