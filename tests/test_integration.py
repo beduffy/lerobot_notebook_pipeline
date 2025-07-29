@@ -14,10 +14,7 @@ from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, 
 from lerobot_notebook_pipeline.dataset_utils.visualization import plot_all_action_histograms
 
 
-@pytest.fixture
-def working_dataset():
-    """Dataset that we know works with the local files."""
-    return LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+# working_dataset fixture is now defined in conftest.py
 
 
 def test_dataset_loading(working_dataset):

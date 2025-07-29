@@ -4,11 +4,7 @@ from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, 
 import matplotlib.pyplot as plt
 import torch
 
-@pytest.fixture
-def simple_dataset():
-    """A pytest fixture to provide a simple LeRobotDataset for testing."""
-    # Using a real but small dataset from the hub for realistic testing
-    return LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+# simple_dataset fixture is now defined in conftest.py
 
 def test_get_dataset_stats(simple_dataset):
     """
