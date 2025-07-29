@@ -21,7 +21,6 @@ def test_requirements_cloud_exists():
     # Check for essential packages
     essential_packages = [
         "torch",
-        "lerobot==0.2.0",
         "numpy",
         "matplotlib",
         "pytest"
@@ -29,6 +28,14 @@ def test_requirements_cloud_exists():
     
     for package in essential_packages:
         assert package in content, f"Package {package} should be in requirements-cloud.txt"
+    
+    # Check for LeRobot installation (either version or GitHub install)
+    lerobot_found = (
+        "lerobot==" in content or 
+        "lerobot @ git+" in content or
+        "lerobot@git+" in content
+    )
+    assert lerobot_found, "LeRobot should be specified in requirements-cloud.txt (version or GitHub install)"
     
     print("✅ requirements-cloud.txt contains essential packages")
 
