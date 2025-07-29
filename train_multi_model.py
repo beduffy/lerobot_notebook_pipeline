@@ -40,11 +40,14 @@ Model Comparison Examples:
     python train_multi_model.py --model pi0fast --episodes 0:5 --steps 500 --output-dir ./models/pi0fast_first5_500
 """
 
+# TODO for cube, i should front to wrist and re upload...
+
 import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 from torch.amp import GradScaler
+from contextlib import nullcontext
 import time
 import os
 import warnings
@@ -271,36 +274,37 @@ def setup_act_policy(input_features, output_features, metadata):
 
 
 def setup_diffusion_policy(input_features, output_features, metadata):
-    """Setup Diffusion Policy with original LeRobot configuration."""
+    """Setup Diffusion Policy with memory-efficient configuration."""
     print(f"🌊 Setting up Diffusion Policy...")
     
+    # Use memory-efficient configuration to fix the memory leak
     config = DiffusionConfig(
         input_features=input_features,
         output_features=output_features,
-        # Original LeRobot Diffusion settings
-        n_obs_steps=2,
-        horizon=16,
-        n_action_steps=8,
+        # Memory-efficient settings
+        n_obs_steps=1,  # Reduced from 2
+        horizon=8,      # Reduced from 16
+        n_action_steps=4,  # Reduced from 8
         vision_backbone="resnet18",
-        crop_shape=(84, 84),
+        crop_shape=(64, 64),  # Reduced from 84x84
         crop_is_random=True,
         pretrained_backbone_weights=None,
         use_group_norm=True,
-        spatial_softmax_num_keypoints=32,
-        down_dims=(512, 1024, 2048),
-        kernel_size=5,
-        n_groups=8,
-        diffusion_step_embed_dim=128,
+        spatial_softmax_num_keypoints=16,  # Reduced from 32
+        down_dims=(256, 512, 1024),  # Reduced dimensions
+        kernel_size=3,  # Reduced from 5
+        n_groups=4,  # Reduced from 8
+        diffusion_step_embed_dim=64,  # Reduced from 128
         use_film_scale_modulation=True,
         noise_scheduler_type="DDPM",
-        num_train_timesteps=100,
+        num_train_timesteps=50,  # Reduced from 100
         beta_schedule="squaredcos_cap_v2",
         beta_start=0.0001,
         beta_end=0.02,
         prediction_type="epsilon",
         clip_sample=True,
         clip_sample_range=1.0,
-        num_inference_steps=10,  # For faster inference during eval
+        num_inference_steps=10,
         do_mask_loss_for_padding=False,
         # Training presets
         optimizer_lr=1e-4,
@@ -311,7 +315,17 @@ def setup_diffusion_policy(input_features, output_features, metadata):
     
     policy = DiffusionPolicy(config, dataset_stats=metadata.stats)
     
-    print(f"   ✅ Diffusion configured with original LeRobot settings")
+    # Enable gradient checkpointing if available
+    if hasattr(policy, 'gradient_checkpointing_enable'):
+        policy.gradient_checkpointing_enable()
+        print("   ✅ Gradient checkpointing enabled")
+    
+    # Set memory fraction to prevent OOM
+    if torch.cuda.is_available():
+        torch.cuda.set_per_process_memory_fraction(0.8)  # Use only 80% of GPU memory
+        print("   ✅ GPU memory fraction set to 80%")
+    
+    print(f"   ✅ Diffusion configured with memory-efficient settings")
     print(f"   Horizon: {config.horizon}")
     print(f"   Action steps: {config.n_action_steps}")
     print(f"   Backbone: {config.vision_backbone}")
@@ -384,7 +398,7 @@ def setup_pi0fast_policy(input_features, output_features, metadata):
     return policy, config
 
 
-def setup_policy_and_config(model_type: str, metadata):
+def setup_policy_and_config(model_type: str, metadata, camera_remap=None):
     """Setup policy based on model type."""
     print(f"\n🧠 Setting up {model_type.upper()} policy...")
     
@@ -392,6 +406,19 @@ def setup_policy_and_config(model_type: str, metadata):
     features = dataset_to_policy_features(metadata.features)
     output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     input_features = {key: ft for key, ft in features.items() if key not in output_features}
+    
+    # Apply camera remapping if specified
+    if camera_remap:
+        print(f"   📷 Applying camera remapping: {camera_remap}")
+        remapped_input_features = {}
+        for key, ft in input_features.items():
+            if key in camera_remap:
+                new_key = camera_remap[key]
+                print(f"      {key} -> {new_key}")
+                remapped_input_features[new_key] = ft
+            else:
+                remapped_input_features[key] = ft
+        input_features = remapped_input_features
     
     print(f"   Input features: {list(input_features.keys())}")
     print(f"   Output features: {list(output_features.keys())}")
@@ -417,7 +444,7 @@ def setup_policy_and_config(model_type: str, metadata):
 
 
 def create_dataloader(full_dataset, multi_episode_indices, delta_timestamps, batch_size=8, 
-                     num_workers=None, video_backend="pyav"):
+                     num_workers=None, video_backend="pyav", camera_remap=None):
     """Create dataloader for multi-episode training."""
     print(f"\n📦 Creating multi-episode dataloader...")
     
@@ -437,6 +464,35 @@ def create_dataloader(full_dataset, multi_episode_indices, delta_timestamps, bat
     
     # Create subset for our episodes
     multi_episode_dataset = Subset(dataset_with_config, multi_episode_indices)
+    
+    # Apply camera remapping to dataset if specified
+    if camera_remap:
+        print(f"   📷 Applying camera remapping to dataset")
+        original_dataset = multi_episode_dataset
+        
+        class CameraRemapDataset(torch.utils.data.Dataset):
+            def __init__(self, dataset, camera_remap):
+                self.dataset = dataset
+                self.camera_remap = camera_remap
+            
+            def __len__(self):
+                return len(self.dataset)
+            
+            def __getitem__(self, idx):
+                batch = self.dataset[idx]
+                remapped_batch = {}
+                
+                for key, value in batch.items():
+                    if key in self.camera_remap:
+                        # Remap camera keys
+                        new_key = self.camera_remap[key]
+                        remapped_batch[new_key] = value
+                    else:
+                        remapped_batch[key] = value
+                
+                return remapped_batch
+        
+        multi_episode_dataset = CameraRemapDataset(multi_episode_dataset, camera_remap)
     
     # Create dataloader
     dataloader = DataLoader(
@@ -497,8 +553,27 @@ def get_optimizer_config(model_type: str, config):
         }
 
 
+def cleanup_gpu_memory():
+    """Clean up GPU memory to prevent OOM errors."""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+def monitor_gpu_memory(step_name=""):
+    """Monitor GPU memory usage."""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        free = total - allocated
+        print(f"   📊 {step_name} - GPU: {allocated:.1f}GB/{total:.1f}GB (free: {free:.1f}GB)")
+        return allocated, total, free
+    return 0, 0, 0
+
+
 def train_multi_episode(policy, dataloader, num_steps, device, model_type, config, 
-                       episodes_info, cloud_mode=False, accumulation_steps=1):
+                       episodes_info, cloud_mode=False, accumulation_steps=1, checkpoint_dir=None, checkpoint_freq=5000):
     """Train policy on multiple episodes with model-specific optimizations."""
     episode_count = len(episodes_info) if isinstance(episodes_info, list) else 1
     is_vla_model = model_type in ["smolvla", "pi0fast"]  # Vision-Language-Action models
@@ -506,6 +581,14 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
     print(f"\n🚀 Starting {model_type.upper()} training on {episode_count} episodes...")
     if is_vla_model:
         print(f"   🧠 VLA Model: Will add language task descriptions")
+    
+    # Setup checkpointing
+    if checkpoint_dir:
+        checkpoint_dir = Path(checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        print(f"   💾 Checkpointing enabled: every {checkpoint_freq} steps to {checkpoint_dir}")
+    else:
+        print(f"   ⚠️  No checkpointing - training progress will be lost if interrupted")
     
     # Get optimizer config for this model type
     opt_config = get_optimizer_config(model_type, config)
@@ -517,9 +600,17 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
     print(f"   Device: {device}")
     print(f"   Mode: {'Cloud' if cloud_mode else 'Local'}")
     
+    # GPU memory monitoring
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+        monitor_gpu_memory("Initial")
+    
     # Setup training
     policy.to(device)
     policy.train()
+    
+    if device.type == "cuda":
+        monitor_gpu_memory("After model to device")
     
     # Optimizer - use AdamW for all model types
     optimizer = torch.optim.AdamW(
@@ -528,8 +619,20 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
         weight_decay=opt_config['weight_decay']
     )
     
-    # Mixed precision training
-    grad_scaler = GradScaler(device.type, enabled=device.type == "cuda")
+    # Mixed precision training - handle BFloat16 compatibility for large models
+    if device.type == "cuda":
+        # Check if model uses BFloat16 (common in large models like SmolVLA)
+        has_bfloat16 = any(p.dtype == torch.bfloat16 for p in policy.parameters())
+        if has_bfloat16:
+            print("   ⚠️  Model uses BFloat16, disabling grad scaler for compatibility")
+            grad_scaler = GradScaler(enabled=False)
+            use_amp = False  # Disable autocast to avoid BFloat16 issues
+        else:
+            grad_scaler = GradScaler(device.type, enabled=True)
+            use_amp = True
+    else:
+        grad_scaler = GradScaler(enabled=False)
+        use_amp = False
     
     # Learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_steps)
@@ -546,6 +649,13 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.deterministic = False
+        # Enable memory efficient attention if available
+        try:
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            print("   ✅ Memory efficient attention enabled")
+        except:
+            pass
     
     # Training loop
     start_time = time.time()
@@ -557,46 +667,94 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
         
         # Gradient accumulation
         for acc_step in range(accumulation_steps):
-            # Get batch
-            batch = next(dl_iter)
-            
-            # Move to device efficiently
-            for key in batch:
-                if isinstance(batch[key], torch.Tensor):
-                    batch[key] = batch[key].to(device, non_blocking=True)
-            
-            # Add language task for VLA models
-            if is_vla_model:
-                # TODO later might want this configurable
-                batch["task"] = "grab red cube and put to left"  # Default task description
-            
-            # Mixed precision forward pass
-            with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-                loss, output_dict = policy.forward(batch)
-                loss = loss / accumulation_steps
-                accumulated_loss += loss.item()
-            
-            # Scaled backward pass
-            grad_scaler.scale(loss).backward()
+            try:
+                # Get batch
+                batch = next(dl_iter)
+                
+                # Move to device efficiently
+                for key in batch:
+                    if isinstance(batch[key], torch.Tensor):
+                        batch[key] = batch[key].to(device, non_blocking=True)
+                
+                # Add language task for VLA models
+                if is_vla_model:
+                    # TODO later might want this configurable
+                    batch["task"] = "grab red cube and put to left"  # Default task description
+                
+                # Forward pass with standard mixed precision
+                with torch.autocast(device_type=device.type) if use_amp else nullcontext():
+                    loss, output_dict = policy.forward(batch)
+                    loss = loss / accumulation_steps
+                    accumulated_loss += loss.item()
+                
+                # Backward pass - handle disabled grad scaler
+                if grad_scaler.is_enabled():
+                    grad_scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+                
+            except torch.cuda.OutOfMemoryError as e:
+                print(f"\n❌ CUDA Out of Memory Error at step {step}")
+                print(f"   Current GPU memory: {torch.cuda.memory_allocated()/1024**3:.2f}GB")
+                print(f"   Total GPU memory: {torch.cuda.get_device_properties(0).total_memory/1024**3:.2f}GB")
+                print(f"   Try reducing batch size or accumulation steps")
+                cleanup_gpu_memory()
+                raise e
         
-        # Gradient clipping and optimizer step
-        grad_scaler.unscale_(optimizer)
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            policy.parameters(), 
-            max_norm=1.0,
-            error_if_nonfinite=False
-        )
-        
-        grad_scaler.step(optimizer)
-        grad_scaler.update()
+        # Gradient clipping and optimizer step - handle disabled grad scaler
+        if grad_scaler.is_enabled():
+            grad_scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                policy.parameters(), 
+                max_norm=1.0,
+                error_if_nonfinite=False
+            )
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
+        else:
+            # Manual gradient scaling when grad scaler is disabled
+            for param in policy.parameters():
+                if param.grad is not None:
+                    param.grad.data.mul_(1.0 / accumulation_steps)
+            
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                policy.parameters(), 
+                max_norm=1.0,
+                error_if_nonfinite=False
+            )
+            optimizer.step()
         optimizer.zero_grad()
         lr_scheduler.step()
+        
+        # Clean up memory periodically
+        if step % 10 == 0 and device.type == "cuda":
+            cleanup_gpu_memory()
+            if step % 100 == 0:  # Monitor memory every 100 steps
+                monitor_gpu_memory(f"Step {step}")
         
         # Record metrics
         loss_value = accumulated_loss
         losses.append(loss_value)
         step_time = time.time() - step_start
         step_times.append(step_time)
+        
+        # Checkpointing
+        if checkpoint_dir and (step + 1) % checkpoint_freq == 0:
+            checkpoint_path = checkpoint_dir / f"checkpoint_step_{step+1}.pt"
+            checkpoint_data = {
+                'step': step + 1,
+                'model_state_dict': policy.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'lr_scheduler_state_dict': lr_scheduler.state_dict(),
+                'losses': losses,
+                'config': config,
+                'model_type': model_type,
+                'episodes_info': episodes_info,
+                'final_loss': loss_value,
+                'training_time': time.time() - start_time
+            }
+            torch.save(checkpoint_data, checkpoint_path)
+            print(f"   💾 Checkpoint saved: {checkpoint_path}")
         
         # Logging
         if step % log_every == 0 or step == num_steps - 1:
@@ -605,13 +763,21 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
             eta_min = (num_steps - step - 1) / steps_per_sec / 60 if steps_per_sec > 0 else 0
             current_lr = optimizer.param_groups[0]["lr"]
             
+            # GPU memory monitoring
+            gpu_memory_info = ""
+            if device.type == "cuda":
+                memory_used = torch.cuda.memory_allocated() / 1024**3
+                memory_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                memory_free = memory_total - memory_used
+                gpu_memory_info = f" | GPU: {memory_used:.1f}GB/{memory_total:.1f}GB"
+            
             if cloud_mode:
                 avg_loss = np.mean(losses[-min(50, len(losses)):])
                 print(f"   Step {step:4d}/{num_steps} | "
                       f"Loss: {loss_value:.4f} | "
                       f"Avg: {avg_loss:.4f} | "
                       f"{steps_per_sec:.1f} steps/s | "
-                      f"ETA: {eta_min:.1f}min")
+                      f"ETA: {eta_min:.1f}min{gpu_memory_info}")
             else:
                 avg_loss = np.mean(losses[-log_every:])
                 avg_time = np.mean(step_times[-log_every:])
@@ -620,7 +786,7 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
                       f"Avg Loss: {avg_loss:.6f} | "
                       f"Time/step: {avg_time:.3f}s | "
                       f"LR: {current_lr:.1e} | "
-                      f"ETA: {eta_min:.1f}min")
+                      f"ETA: {eta_min:.1f}min{gpu_memory_info}")
     
     total_time = time.time() - start_time
     final_steps_per_sec = num_steps / total_time if total_time > 0 else 0
@@ -725,13 +891,33 @@ def main():
     parser.add_argument("--video-backend", choices=["pyav"], default="pyav", 
                        help="Video backend")
     
+    # Camera remapping for wrist camera datasets
+    parser.add_argument("--camera-remap", type=str, default=None,
+                       help="Camera remapping (e.g., 'observation.images.front:observation.images.wrist')")
+    
     # Cloud/advanced options
     parser.add_argument("--cloud", action="store_true", help="Enable cloud optimizations")
     parser.add_argument("--upload-model", action="store_true", help="Upload to HuggingFace")
     parser.add_argument("--wandb", action="store_true", help="Use W&B logging")
     parser.add_argument("--no-plot", action="store_true", help="Don't show plots (save only)")
     
+    # Checkpointing options
+    parser.add_argument("--checkpoint-freq", type=int, default=5000, 
+                       help="Save checkpoint every N steps (default: 5000)")
+    parser.add_argument("--no-checkpoint", action="store_true", 
+                       help="Disable checkpointing")
+    
     args = parser.parse_args()
+    
+    # Parse camera remapping
+    camera_remap = None
+    if args.camera_remap:
+        camera_remap = {}
+        for mapping in args.camera_remap.split(','):
+            if ':' in mapping:
+                old_key, new_key = mapping.strip().split(':')
+                camera_remap[old_key.strip()] = new_key.strip()
+        print(f"📷 Camera remapping: {camera_remap}")
     
     # Auto-configure output directory
     if args.output_dir is None:
@@ -749,26 +935,26 @@ def main():
         if args.cloud or torch.cuda.is_available():
             # Different models have different memory requirements
             if args.model == "pi0fast":
-                args.batch_size = 4   # π0-FAST is very large (2.9B params)
-                accumulation_steps = 32  # High accumulation for effective batch size
+                args.batch_size = 2   # π0-FAST is very large (2.9B params) - reduced from 4
+                accumulation_steps = 64  # Increased accumulation for effective batch size
             elif args.model == "smolvla":
-                args.batch_size = 8   # SmolVLA is large (450M params)
-                accumulation_steps = 16
+                args.batch_size = 2   # SmolVLA is very large (450M params) - very conservative
+                accumulation_steps = 64  # Higher accumulation to maintain effective batch size
             elif args.model == "diffusion":
-                args.batch_size = 16  # Diffusion is larger (263M params)
-                accumulation_steps = 8
+                args.batch_size = 8   # Diffusion is larger (263M params) - reduced from 16
+                accumulation_steps = 16
             elif args.model == "vqbet":
-                args.batch_size = 24  # VQBet is smaller (38M params)
-                accumulation_steps = 4
+                args.batch_size = 16  # VQBet is smaller (38M params) - reduced from 24
+                accumulation_steps = 8
             else:  # ACT
-                args.batch_size = 32  # ACT is small (51M params)
-                accumulation_steps = 4
+                args.batch_size = 16  # ACT is small (51M params) - reduced from 32
+                accumulation_steps = 8
         else:
             # CPU: smaller batch sizes
             if args.model in ["pi0fast", "smolvla"]:
-                args.batch_size = 2   # Foundation models need smaller batches on CPU
+                args.batch_size = 1   # Foundation models need smaller batches on CPU
             else:
-                args.batch_size = 8
+                args.batch_size = 4   # Reduced from 8
             accumulation_steps = 1
     else:
         accumulation_steps = max(1, 128 // args.batch_size) if (args.cloud or torch.cuda.is_available()) else 1
@@ -812,18 +998,20 @@ def main():
         all_data_indices = get_multi_episode_indices(full_dataset, episode_indices)
         
         # 2. Setup policy based on model type
-        policy, config, delta_timestamps = setup_policy_and_config(args.model, metadata)
+        policy, config, delta_timestamps = setup_policy_and_config(args.model, metadata, camera_remap)
         
         # 3. Create dataloader
         dataloader = create_dataloader(
             full_dataset, all_data_indices, delta_timestamps, 
-            args.batch_size, video_backend=args.video_backend
+            args.batch_size, video_backend=args.video_backend, camera_remap=camera_remap
         )
         
         # 4. Train
+        checkpoint_dir = None if args.no_checkpoint else args.output_dir
         losses = train_multi_episode(
             policy, dataloader, args.steps, device, args.model, config, episode_indices,
-            cloud_mode=args.cloud, accumulation_steps=accumulation_steps
+            cloud_mode=args.cloud, accumulation_steps=accumulation_steps,
+            checkpoint_dir=checkpoint_dir, checkpoint_freq=args.checkpoint_freq
         )
         
         # Log to wandb
