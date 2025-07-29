@@ -19,8 +19,8 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-from lerobot.common.policies.act.modeling_act import ACTPolicy
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot_notebook_pipeline.dataset_utils.visualization import create_training_animation
 
 
