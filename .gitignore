@@ -35,6 +35,7 @@ MUJOCO_LOG.TXT
 # TODO but maybe the below two shouldn't even be tere
 meta/
 videos/
+# TODO can we move these two above
 
 # TODO IDEALLY we could just put all into a model folder but then things might break. done test!
 data_collection_logs/
