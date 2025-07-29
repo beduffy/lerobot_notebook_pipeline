@@ -14,6 +14,8 @@ TODO ctrl c should be more safe, e.g. timer of 3 seconds for me to put hand unde
 TODO does simulate work better with so101. understand maniskill so100 example pickcube-v1 perfectly and then use that. 
 TODO XLErobot mujoco try!! 
 TODO learn lightning ai jobs task scheduler to run 5 different jobs with 5 of their own GPUs. o3 had good advice
+TODO Yes, you can easily enforce a timeout on individual pytest tests using the pytest-timeout plugin.
+
 
 ACTUAL NEXT STEPS:
 - Train SmolVLA + pizero0.5 and groot n1.5 and see if more general, less shaky and how much it costs!

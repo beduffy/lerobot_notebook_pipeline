@@ -63,7 +63,7 @@ def main():
         print("🛑 Press Ctrl+C to stop the server")
         print()
         
-        # Start server
+        # Start server (HTTP only)
         server.run_http_server(host=args.host, port=args.port)
         
     except KeyboardInterrupt:
