@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Multi-Model Inference Test Script
+Multi-Model Inference Test Script with FPS Profiling
 
 Tests inference for all available lerobot model architectures before training.
 This is like a "unit test" to ensure all model types work with your pipeline.
+Now includes FPS profiling to measure real-time performance!
 
 Available models to test:
 - ACT (already working)
@@ -15,7 +16,7 @@ Available models to test:
 - VQBet
 
 Usage:
-    # Test all models
+    # Test all models with FPS profiling
     python test_model_inference.py
     
     # Test specific models only
@@ -26,6 +27,12 @@ Usage:
     
     # Test with pretrained models (for SmolVLA)
     python test_model_inference.py --models smolvla --use-pretrained
+    
+    # Quick test (fewer FPS samples)
+    python test_model_inference.py --quick
+    
+    # Detailed profiling (more samples)
+    python test_model_inference.py --detailed
 """
 
 import argparse
@@ -35,6 +42,10 @@ from pathlib import Path
 import traceback
 from typing import Dict, Any
 import numpy as np
+import time
+import gc
+import psutil
+import os
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning, module="torchvision")
@@ -56,10 +67,11 @@ except ImportError:
 
 
 class ModelInferenceTester:
-    """Test inference for different model architectures."""
+    """Test inference for different model architectures with FPS profiling."""
     
-    def __init__(self, dataset_name: str, device: str = "auto"):
+    def __init__(self, dataset_name: str, device: str = "auto", profile_samples: int = 100):
         self.dataset_name = dataset_name
+        self.profile_samples = profile_samples
         
         # Setup device
         if device == "auto":
@@ -67,9 +79,10 @@ class ModelInferenceTester:
         else:
             self.device = torch.device(device)
         
-        print(f"🧪 Model Inference Tester")
+        print(f"🧪 Model Inference Tester with FPS Profiling")
         print(f"   Dataset: {dataset_name}")
         print(f"   Device: {self.device}")
+        print(f"   Profile samples: {profile_samples}")
         print()
         
         # Load dataset and metadata
@@ -104,6 +117,95 @@ class ModelInferenceTester:
         print(f"   Input features: {list(self.input_features.keys())}")
         print(f"   Output features: {list(self.output_features.keys())}")
         print()
+    
+    def measure_fps_and_memory(self, policy, obs_dict: Dict[str, torch.Tensor], model_name: str) -> Dict[str, Any]:
+        """Measure FPS and memory usage for a policy."""
+        print(f"   🔍 Profiling {model_name} performance...")
+        
+        # Measure memory before
+        process = psutil.Process(os.getpid())
+        memory_before = process.memory_info().rss / 1024 / 1024  # MB
+        
+        if self.device.type == "cuda":
+            gpu_memory_before = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+            torch.cuda.empty_cache()
+        else:
+            gpu_memory_before = 0
+        
+        # Cold start - first inference (often slower)
+        policy.eval()
+        with torch.no_grad():
+            torch.cuda.synchronize() if self.device.type == "cuda" else None
+            cold_start = time.time()
+            action = policy.select_action(obs_dict)
+            torch.cuda.synchronize() if self.device.type == "cuda" else None
+            cold_time = time.time() - cold_start
+        
+        # Warm up with a few runs
+        with torch.no_grad():
+            for _ in range(min(10, self.profile_samples // 10)):
+                policy.select_action(obs_dict)
+        
+        # Measure warm inference performance
+        times = []
+        with torch.no_grad():
+            for i in range(self.profile_samples):
+                torch.cuda.synchronize() if self.device.type == "cuda" else None
+                start_time = time.time()
+                action = policy.select_action(obs_dict)
+                torch.cuda.synchronize() if self.device.type == "cuda" else None
+                end_time = time.time()
+                times.append(end_time - start_time)
+                
+                # Progress indicator for long profiling
+                if i % (self.profile_samples // 4) == 0 and self.profile_samples > 50:
+                    print(f"     Progress: {i}/{self.profile_samples}")
+        
+        # Measure memory after
+        memory_after = process.memory_info().rss / 1024 / 1024  # MB
+        if self.device.type == "cuda":
+            gpu_memory_after = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+        else:
+            gpu_memory_after = 0
+        
+        # Calculate statistics
+        times = np.array(times)
+        mean_time = np.mean(times)
+        std_time = np.std(times)
+        min_time = np.min(times)
+        max_time = np.max(times)
+        
+        # FPS calculations
+        mean_fps = 1.0 / mean_time
+        max_fps = 1.0 / min_time  # Best case FPS
+        min_fps = 1.0 / max_time  # Worst case FPS
+        
+        # Memory usage
+        memory_used = memory_after - memory_before
+        gpu_memory_used = gpu_memory_after - gpu_memory_before
+        
+        performance_stats = {
+            'cold_start_time': cold_time,
+            'cold_start_fps': 1.0 / cold_time,
+            'mean_inference_time': mean_time,
+            'std_inference_time': std_time,
+            'min_inference_time': min_time,
+            'max_inference_time': max_time,
+            'mean_fps': mean_fps,
+            'max_fps': max_fps,
+            'min_fps': min_fps,
+            'memory_used_mb': memory_used,
+            'gpu_memory_used_mb': gpu_memory_used,
+            'action_shape': action.shape,
+            'samples': self.profile_samples
+        }
+        
+        # Print immediate results
+        print(f"     ⚡ Mean FPS: {mean_fps:.1f} | Max FPS: {max_fps:.1f}")
+        print(f"     🕐 Cold start: {cold_time*1000:.1f}ms | Warm: {mean_time*1000:.1f}±{std_time*1000:.1f}ms")
+        print(f"     💾 Memory: {memory_used:.1f}MB RAM | {gpu_memory_used:.1f}MB GPU")
+        
+        return performance_stats
     
     def test_act_model(self, use_pretrained: bool = False) -> Dict[str, Any]:
         """Test ACT model (your working baseline)."""
@@ -140,21 +242,24 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "ACT")
             
             result = {
                 'status': 'SUCCESS',
                 'action_shape': action.shape,
                 'action_dtype': action.dtype,
                 'parameters': sum(p.numel() for p in policy.parameters()),
-                'config': config
+                'config': config,
+                'performance': performance
             }
             
             print(f"   ✅ ACT inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             
             return result
@@ -191,21 +296,24 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "Diffusion")
             
             result = {
                 'status': 'SUCCESS',
                 'action_shape': action.shape,
                 'action_dtype': action.dtype,
                 'parameters': sum(p.numel() for p in policy.parameters()),
-                'config': config
+                'config': config,
+                'performance': performance
             }
             
             print(f"   ✅ Diffusion inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             
             return result
@@ -254,12 +362,15 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 # SmolVLA requires a task description (it's a VLA model!)
                 obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "SmolVLA")
             
             result = {
                 'status': 'SUCCESS',
@@ -268,11 +379,11 @@ class ModelInferenceTester:
                 'parameters': sum(p.numel() for p in policy.parameters()),
                 'config': config,
                 'pretrained': use_pretrained,
-                'model_type': 'VLA'
+                'model_type': 'VLA',
+                'performance': performance
             }
             
             print(f"   ✅ SmolVLA VLA inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             print(f"   Pretrained: {use_pretrained}")
             
@@ -319,12 +430,15 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 # π0 requires a task description (it's a VLA model!)
                 obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "π0")
             
             result = {
                 'status': 'SUCCESS',
@@ -333,11 +447,11 @@ class ModelInferenceTester:
                 'parameters': sum(p.numel() for p in policy.parameters()),
                 'config': config,
                 'pretrained': use_pretrained,
-                'model_type': 'VLA'
+                'model_type': 'VLA',
+                'performance': performance
             }
             
             print(f"   ✅ π0 VLA inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             print(f"   Pretrained: {use_pretrained}")
             print(f"   Type: Vision-Language-Action Model")
@@ -386,12 +500,15 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 # π0-FAST requires a task description (it's a VLA model!)
                 obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "π0-FAST")
             
             result = {
                 'status': 'SUCCESS',
@@ -400,11 +517,11 @@ class ModelInferenceTester:
                 'parameters': sum(p.numel() for p in policy.parameters()),
                 'config': config,
                 'pretrained': use_pretrained,
-                'model_type': 'VLA-FAST'
+                'model_type': 'VLA-FAST',
+                'performance': performance
             }
             
             print(f"   ✅ π0-FAST VLA inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             print(f"   Pretrained: {use_pretrained}")
             print(f"   Type: Autoregressive Vision-Language-Action Model (5x faster training)")
@@ -442,21 +559,24 @@ class ModelInferenceTester:
             policy.to(self.device)
             policy.eval()
             
-            # Test inference
+            # Test basic inference first
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
                 action = policy.select_action(obs_dict)
+            
+            # Measure performance
+            performance = self.measure_fps_and_memory(policy, obs_dict, "VQBet")
             
             result = {
                 'status': 'SUCCESS',
                 'action_shape': action.shape,
                 'action_dtype': action.dtype,
                 'parameters': sum(p.numel() for p in policy.parameters()),
-                'config': config
+                'config': config,
+                'performance': performance
             }
             
             print(f"   ✅ VQBet inference successful!")
-            print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             
             return result
@@ -467,8 +587,8 @@ class ModelInferenceTester:
     
     def run_inference_tests(self, models_to_test: list, use_pretrained: bool = False) -> Dict[str, Any]:
         """Run inference tests for specified models."""
-        print(f"🚀 Running Model Inference Tests")
-        print("=" * 50)
+        print(f"🚀 Running Model Inference Tests with FPS Profiling")
+        print("=" * 60)
         
         # Available test methods
         test_methods = {
@@ -491,33 +611,79 @@ class ModelInferenceTester:
             print()
             try:
                 results[model_name] = test_methods[model_name](use_pretrained)
+                # Clean up memory between tests
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
             except Exception as e:
                 print(f"   💥 Unexpected error testing {model_name}: {e}")
                 results[model_name] = {'status': 'ERROR', 'error': str(e)}
         
         # Summary
-        print("\n" + "=" * 50)
-        print("📊 INFERENCE TEST SUMMARY")
-        print("=" * 50)
+        print("\n" + "=" * 80)
+        print("📊 INFERENCE TEST & PERFORMANCE SUMMARY")
+        print("=" * 80)
         
         successful = []
         failed = []
+        
+        # Performance comparison table
+        print(f"{'Model':<12} {'Status':<8} {'Params':<12} {'Mean FPS':<10} {'Max FPS':<10} {'Cold Start':<12} {'Memory':<12}")
+        print("-" * 80)
         
         for model_name, result in results.items():
             status = result.get('status', 'UNKNOWN')
             if status == 'SUCCESS':
                 successful.append(model_name)
                 params = result.get('parameters', 0)
-                action_shape = result.get('action_shape', 'Unknown')
-                print(f"✅ {model_name:12} | {params:>12,} params | Action: {action_shape}")
+                perf = result.get('performance', {})
+                mean_fps = perf.get('mean_fps', 0)
+                max_fps = perf.get('max_fps', 0)
+                cold_start = perf.get('cold_start_time', 0) * 1000  # Convert to ms
+                memory = perf.get('memory_used_mb', 0)
+                
+                print(f"{model_name:<12} {'✅ OK':<8} {params/1e6:>8.1f}M {mean_fps:>8.1f} {max_fps:>8.1f} {cold_start:>9.1f}ms {memory:>9.1f}MB")
+                
             else:
                 failed.append(model_name)
                 error = result.get('error', 'Unknown error')
-                print(f"❌ {model_name:12} | Failed: {error[:50]}...")
+                print(f"{model_name:<12} {'❌ FAIL':<8} {'N/A':<12} {'N/A':<10} {'N/A':<10} {'N/A':<12} {'N/A':<12}")
         
+        print("-" * 80)
         print(f"\n🎯 Results: {len(successful)}/{len(results)} models working")
+        
         if successful:
             print(f"✅ Working: {', '.join(successful)}")
+            
+            # Find fastest model
+            fastest_model = None
+            fastest_fps = 0
+            for model_name in successful:
+                result = results[model_name]
+                if 'performance' in result:
+                    fps = result['performance'].get('mean_fps', 0)
+                    if fps > fastest_fps:
+                        fastest_fps = fps
+                        fastest_model = model_name
+            
+            if fastest_model:
+                print(f"🏆 Fastest model: {fastest_model} ({fastest_fps:.1f} FPS)")
+                
+            # Real-time capability analysis
+            print(f"\n⚡ Real-time Performance Analysis (Target: >30 FPS for real-time)")
+            realtime_capable = []
+            for model_name in successful:
+                result = results[model_name]
+                if 'performance' in result:
+                    fps = result['performance'].get('mean_fps', 0)
+                    if fps >= 30:
+                        realtime_capable.append(f"{model_name} ({fps:.1f} FPS)")
+            
+            if realtime_capable:
+                print(f"🚀 Real-time capable: {', '.join(realtime_capable)}")
+            else:
+                print(f"⚠️  No models achieve 30+ FPS. Consider optimizations or GPU inference.")
+                
         if failed:
             print(f"❌ Failed: {', '.join(failed)}")
         
@@ -525,7 +691,7 @@ class ModelInferenceTester:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Test inference for multiple model architectures")
+    parser = argparse.ArgumentParser(description="Test inference for multiple model architectures with FPS profiling")
     parser.add_argument("--dataset", default="bearlover365/red_cube_always_in_same_place", 
                        help="Dataset to test with")
     parser.add_argument("--models", default="act,diffusion,pi0,pi0fast,smolvla,vqbet",
@@ -533,23 +699,34 @@ def main():
     parser.add_argument("--use-pretrained", action="store_true",
                        help="Use pretrained models where available (SmolVLA)")
     parser.add_argument("--device", default="auto", help="Device to use (auto/cpu/cuda)")
+    parser.add_argument("--quick", action="store_true", help="Quick test (50 samples)")
+    parser.add_argument("--detailed", action="store_true", help="Detailed profiling (500 samples)")
     
     args = parser.parse_args()
+    
+    # Set profiling samples based on mode
+    if args.quick:
+        profile_samples = 50
+    elif args.detailed:
+        profile_samples = 500
+    else:
+        profile_samples = 100  # Default
     
     # Parse models list
     models_to_test = [m.strip() for m in args.models.split(",")]
     
-    print("🧪 MULTI-MODEL INFERENCE TESTING")
-    print("=" * 40)
-    print("🎯 Goal: Verify all model types work before training")
+    print("🧪 MULTI-MODEL INFERENCE TESTING WITH FPS PROFILING")
+    print("=" * 60)
+    print("🎯 Goal: Verify all model types work and measure performance")
     print(f"📊 Dataset: {args.dataset}")
     print(f"🤖 Models: {', '.join(models_to_test)}")
     print(f"📦 Pretrained: {args.use_pretrained}")
+    print(f"🔍 Profile samples: {profile_samples}")
     print()
     
     try:
         # Create tester
-        tester = ModelInferenceTester(args.dataset, args.device)
+        tester = ModelInferenceTester(args.dataset, args.device, profile_samples)
         
         # Run tests
         results = tester.run_inference_tests(models_to_test, args.use_pretrained)
@@ -559,6 +736,7 @@ def main():
         
         if successful_count == len(models_to_test):
             print(f"\n🎉 ALL MODELS WORKING! Ready for training pipeline!")
+            print(f"💡 Tip: Use fastest models for real-time deployment on CPU")
             return 0
         else:
             print(f"\n⚠️  {successful_count}/{len(models_to_test)} models working. Fix failed models before training.")
