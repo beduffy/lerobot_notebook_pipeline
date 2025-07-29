@@ -13,74 +13,78 @@ def run_command(cmd, description=""):
     """Run a command and handle errors gracefully."""
     print(f"🔧 {description}")
     try:
+        # Use sys.executable to ensure we're using the correct pip
+        if cmd.startswith("pip "):
+            cmd = f"{sys.executable} -m {cmd}"
+        print(f"Executing command: {cmd}")
         result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
         if result.stdout:
             print(result.stdout)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"⚠️  Warning: {description} failed: {e}")
+        print(f"❌ Error: {description} failed.")
+        if e.stdout:
+            print(f"Output:\n{e.stdout}")
         if e.stderr:
-            print(f"Error: {e.stderr}")
-        return False
+            print(f"Error details:\n{e.stderr}")
+        # Exit the script if a command fails
+        sys.exit(1)
+
 
 def main():
     print("🚀 Setting up LeRobot Notebook Pipeline on Cloud...")
     
-    # Upgrade pip
+    # --- 1. Upgrade pip ---
     run_command("pip install --upgrade pip", "Upgrading pip")
     
-    # Install dependencies
+    # --- 2. Install Dependencies ---
     if Path("requirements-cloud.txt").exists():
-        run_command("pip install -r requirements-cloud.txt", "Installing Python dependencies")
+        run_command("pip install -r requirements-cloud.txt", "Installing Python dependencies from requirements-cloud.txt")
     else:
-        print("⚠️  requirements-cloud.txt not found, using fallback dependencies...")
-        fallback_packages = [
-            "torch>=2.0.0",
-            "torchvision>=0.15.0", 
-            "lerobot==0.2.0",
-            "numpy>=1.24.0",
-            "matplotlib>=3.7.0",
-            "pytest>=7.4.0",
-            "opencv-python>=4.8.0"
-        ]
-        for package in fallback_packages:
-            run_command(f"pip install '{package}'", f"Installing {package}")
-    
-    # Install this package
+        print("⚠️  requirements-cloud.txt not found. Please ensure the file exists.")
+        sys.exit(1)
+        
+    # --- 3. Install this package in editable mode ---
     if Path("pyproject.toml").exists():
         run_command("pip install -e .", "Installing lerobot_notebook_pipeline package")
     
-    # Create directories
+    # --- 4. Create output directories ---
     print("📁 Creating output directories...")
     directories = ["models", "data", "videos", "single_episode_experiments"]
     for dir_name in directories:
         Path(dir_name).mkdir(exist_ok=True)
         print(f"  ✓ {dir_name}/")
     
-    # Test installation
-    print("🧪 Testing installation...")
+    # --- 5. Test Installation ---
+    print("🧪 Verifying installation...")
     try:
         import torch
         import lerobot
-        print(f"✅ PyTorch: {torch.__version__}")
-        print(f"✅ LeRobot: {lerobot.__version__}")
-        print(f"✅ CUDA available: {torch.cuda.is_available()}")
+        import cv2
+        
+        print(f"  ✓ PyTorch: {torch.__version__}")
+        print(f"  ✓ LeRobot: {lerobot.__version__}")
+        print(f"  ✓ OpenCV: {cv2.__version__}")
+        print(f"  ✓ CUDA available: {torch.cuda.is_available()}")
         
         # Test package imports
         from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats
         from lerobot_notebook_pipeline.dataset_utils.visualization import plot_action_histogram
-        print("✅ Package imports working")
+        print("  ✓ Package imports are working correctly.")
         
     except ImportError as e:
         print(f"❌ Import test failed: {e}")
+        print("   This might be due to an installation issue. Please check the logs above.")
         return False
     
-    # Run quick tests
+    # --- 6. Run quick tests ---
     if Path("tests").exists():
         print("🏃 Running quick test suite...")
-        success = run_command("python -m pytest tests/ -v --tb=short --durations=0", "Running tests")
+        # We use a simple command here; `run_command` will handle the verbose output
+        success = run_command("pytest tests/ -v -s --tb=short --durations=0", "Running tests with pytest")
         if not success:
-            print("⚠️  Some tests failed, but setup is complete")
+            print("⚠️  Some tests failed. Please review the output above.")
+            # We don't exit here, as the user might want to debug
     
     print("\n✅ Setup complete! You can now run your experiments.")
     print("\nQuick start commands:")
@@ -91,5 +95,7 @@ def main():
     return True
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1) 
+    if main():
+        sys.exit(0)
+    else:
+        sys.exit(1) 
