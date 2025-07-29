@@ -110,8 +110,14 @@ class ModelInferenceTester:
         print("🤖 Testing ACT Model...")
         
         try:
-            from lerobot.common.policies.act.configuration_act import ACTConfig
-            from lerobot.common.policies.act.modeling_act import ACTPolicy
+            # Try new ACT import structure first
+            try:
+                from lerobot.policies.act.configuration_act import ACTConfig
+                from lerobot.policies.act.modeling_act import ACTPolicy
+            except ImportError:
+                # Fallback to old structure
+                from lerobot.common.policies.act.configuration_act import ACTConfig
+                from lerobot.common.policies.act.modeling_act import ACTPolicy
             
             # Create config with your proven settings
             config = ACTConfig(
@@ -162,8 +168,14 @@ class ModelInferenceTester:
         print("🌊 Testing Diffusion Policy...")
         
         try:
-            from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
-            from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
+            # Try new Diffusion import structure first
+            try:
+                from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
+                from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+            except ImportError:
+                # Fallback to old structure
+                from lerobot.common.policies.diffusion.configuration_diffusion import DiffusionConfig
+                from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy
             
             # Create config with minimal required parameters
             config = DiffusionConfig(
@@ -208,8 +220,14 @@ class ModelInferenceTester:
         print("🧠 Testing SmolVLA Model...")
         
         try:
-            from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
-            from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+            # Try new SmolVLA import structure first
+            try:
+                from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+                from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+            except ImportError:
+                # Fallback to old structure
+                from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
+                from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
             
             if use_pretrained:
                 # Use pretrained SmolVLA
@@ -226,9 +244,8 @@ class ModelInferenceTester:
                 config = SmolVLAConfig(
                     input_features=self.input_features,
                     output_features=self.output_features,
-                    # SmolVLA specific settings
-                    use_quantization=False,  # Disable for testing
-                    # Add more config as needed
+                    # SmolVLA specific settings (minimal config)
+                    # Note: use_quantization removed - not supported in this version
                 )
                 
                 # Create policy
@@ -240,6 +257,8 @@ class ModelInferenceTester:
             # Test inference
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
+                # SmolVLA requires a task description (it's a VLA model!)
+                obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
             
             result = {
@@ -248,10 +267,11 @@ class ModelInferenceTester:
                 'action_dtype': action.dtype,
                 'parameters': sum(p.numel() for p in policy.parameters()),
                 'config': config,
-                'pretrained': use_pretrained
+                'pretrained': use_pretrained,
+                'model_type': 'VLA'
             }
             
-            print(f"   ✅ SmolVLA inference successful!")
+            print(f"   ✅ SmolVLA VLA inference successful!")
             print(f"   Action shape: {action.shape}")
             print(f"   Parameters: {result['parameters']:,}")
             print(f"   Pretrained: {use_pretrained}")
@@ -302,6 +322,8 @@ class ModelInferenceTester:
             # Test inference
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
+                # π0 requires a task description (it's a VLA model!)
+                obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
             
             result = {
@@ -367,6 +389,8 @@ class ModelInferenceTester:
             # Test inference
             with torch.no_grad():
                 obs_dict = {k: v.to(self.device) for k, v in self.sample_observation.items()}
+                # π0-FAST requires a task description (it's a VLA model!)
+                obs_dict["task"] = "grab red cube and put to left"
                 action = policy.select_action(obs_dict)
             
             result = {
@@ -398,8 +422,14 @@ class ModelInferenceTester:
         print("🎰 Testing VQBet Model...")
         
         try:
-            from lerobot.common.policies.vqbet.configuration_vqbet import VQBeTConfig
-            from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTPolicy
+            # Try new VQBet import structure first
+            try:
+                from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
+                from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
+            except ImportError:
+                # Fallback to old structure
+                from lerobot.common.policies.vqbet.configuration_vqbet import VQBeTConfig
+                from lerobot.common.policies.vqbet.modeling_vqbet import VQBeTPolicy
             
             # Create config with only required parameters
             config = VQBeTConfig(

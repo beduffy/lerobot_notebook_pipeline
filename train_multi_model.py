@@ -3,9 +3,11 @@
 Multi-Model Training Script with Episode Slicing Support
 
 Extended version of train_single_episode.py that supports multiple architectures and multi-episode training:
-- ACT (proven working)
-- Diffusion Policy (working)  
-- VQBet (working)
+- ACT (proven working - 51M params)
+- Diffusion Policy (working - 263M params)  
+- VQBet (working - 38M params)
+- SmolVLA (foundation VLA model - 450M params)
+- π0-FAST (autoregressive VLA model - 2.9B params)
 
 Episode Selection Examples:
     # Single episode
@@ -22,11 +24,20 @@ Episode Selection Examples:
     # All episodes
     python train_multi_model.py --model act --episodes all --steps 1000
     
+Foundation Model Examples:
+    # Train SmolVLA foundation model on all episodes
+    python train_multi_model.py --model smolvla --episodes all --steps 1000
+    
+    # Train π0-FAST on first 5 episodes (autoregressive VLA)
+    python train_multi_model.py --model pi0fast --episodes 0:5 --steps 1000
+    
 Model Comparison Examples:
     # Compare all models on same data
     python train_multi_model.py --model act --episodes 0:5 --steps 500 --output-dir ./models/act_first5_500
     python train_multi_model.py --model diffusion --episodes 0:5 --steps 500 --output-dir ./models/diffusion_first5_500  
     python train_multi_model.py --model vqbet --episodes 0:5 --steps 500 --output-dir ./models/vqbet_first5_500
+    python train_multi_model.py --model smolvla --episodes 0:5 --steps 500 --output-dir ./models/smolvla_first5_500
+    python train_multi_model.py --model pi0fast --episodes 0:5 --steps 500 --output-dir ./models/pi0fast_first5_500
 """
 
 import argparse
@@ -66,6 +77,33 @@ from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
 from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
+
+# Import foundation models (VLAs)
+try:
+    from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
+    from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+    SMOLVLA_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.smolvla.configuration_smolvla import SmolVLAConfig
+        from lerobot.common.policies.smolvla.modeling_smolvla import SmolVLAPolicy
+        SMOLVLA_AVAILABLE = True
+    except ImportError:
+        SMOLVLA_AVAILABLE = False
+
+try:
+    from lerobot.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
+    from lerobot.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+    PI0FAST_AVAILABLE = True
+except ImportError:
+    # Fallback to old structure or not available
+    try:
+        from lerobot.common.policies.pi0fast.configuration_pi0fast import PI0FASTConfig
+        from lerobot.common.policies.pi0fast.modeling_pi0fast import PI0FASTPolicy
+        PI0FAST_AVAILABLE = True
+    except ImportError:
+        PI0FAST_AVAILABLE = False
 
 # Optional imports
 try:
@@ -272,6 +310,52 @@ def setup_vqbet_policy(input_features, output_features, metadata):
     return policy, config
 
 
+def setup_smolvla_policy(input_features, output_features, metadata):
+    """Setup SmolVLA policy with working configuration."""
+    print(f"🧠 Setting up SmolVLA VLA policy...")
+    
+    if not SMOLVLA_AVAILABLE:
+        raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+    
+    config = SmolVLAConfig(
+        input_features=input_features,
+        output_features=output_features,
+        # SmolVLA specific settings (minimal config)
+    )
+    
+    policy = SmolVLAPolicy(config, dataset_stats=metadata.stats)
+    
+    print(f"   ✅ SmolVLA VLA configured")
+    print(f"   Type: Vision-Language-Action Model")
+    print(f"   Parameters: {sum(p.numel() for p in policy.parameters()):,}")
+    
+    return policy, config
+
+
+def setup_pi0fast_policy(input_features, output_features, metadata):
+    """Setup π0-FAST policy with working configuration."""
+    print(f"⚡ Setting up π0-FAST VLA policy...")
+    
+    if not PI0FAST_AVAILABLE:
+        raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+    
+    config = PI0FASTConfig(
+        input_features=input_features,
+        output_features=output_features,
+        # π0-FAST specific settings (autoregressive)
+        chunk_size=10,
+        n_action_steps=10,
+    )
+    
+    policy = PI0FASTPolicy(config, dataset_stats=metadata.stats)
+    
+    print(f"   ✅ π0-FAST VLA configured")
+    print(f"   Type: Autoregressive Vision-Language-Action Model (5x faster training)")
+    print(f"   Parameters: {sum(p.numel() for p in policy.parameters()):,}")
+    
+    return policy, config
+
+
 def setup_policy_and_config(model_type: str, metadata):
     """Setup policy based on model type."""
     print(f"\n🧠 Setting up {model_type.upper()} policy...")
@@ -291,8 +375,12 @@ def setup_policy_and_config(model_type: str, metadata):
         policy, config = setup_diffusion_policy(input_features, output_features, metadata)
     elif model_type == "vqbet":
         policy, config = setup_vqbet_policy(input_features, output_features, metadata)
+    elif model_type == "smolvla":
+        policy, config = setup_smolvla_policy(input_features, output_features, metadata)
+    elif model_type == "pi0fast":
+        policy, config = setup_pi0fast_policy(input_features, output_features, metadata)
     else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+        raise ValueError(f"Unsupported model type: {model_type}. Available: act, diffusion, vqbet, smolvla, pi0fast")
     
     # Resolve delta timestamps for action chunking
     delta_timestamps = resolve_delta_timestamps(config, metadata)
@@ -361,6 +449,18 @@ def get_optimizer_config(model_type: str, config):
             'lr': 1e-4,
             'weight_decay': 1e-4,
         }
+    elif model_type == "smolvla":
+        # SmolVLA foundation model settings
+        return {
+            'lr': 5e-5,  # Lower LR for large foundation models
+            'weight_decay': 1e-4,
+        }
+    elif model_type == "pi0fast":
+        # π0-FAST foundation model settings
+        return {
+            'lr': 3e-5,  # Even lower LR for very large models (2.9B params)
+            'weight_decay': 1e-4,
+        }
     else:
         # Default settings
         return {
@@ -373,7 +473,11 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
                        episodes_info, cloud_mode=False, accumulation_steps=1):
     """Train policy on multiple episodes with model-specific optimizations."""
     episode_count = len(episodes_info) if isinstance(episodes_info, list) else 1
+    is_vla_model = model_type in ["smolvla", "pi0fast"]  # Vision-Language-Action models
+    
     print(f"\n🚀 Starting {model_type.upper()} training on {episode_count} episodes...")
+    if is_vla_model:
+        print(f"   🧠 VLA Model: Will add language task descriptions")
     
     # Get optimizer config for this model type
     opt_config = get_optimizer_config(model_type, config)
@@ -432,6 +536,11 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
             for key in batch:
                 if isinstance(batch[key], torch.Tensor):
                     batch[key] = batch[key].to(device, non_blocking=True)
+            
+            # Add language task for VLA models
+            if is_vla_model:
+                # TODO later might want this configurable
+                batch["task"] = "grab red cube and put to left"  # Default task description
             
             # Mixed precision forward pass
             with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
@@ -569,8 +678,15 @@ def plot_training_progress(losses, model_type, save_path=None, show_plot=True, e
 
 def main():
     parser = argparse.ArgumentParser(description="Train multiple model architectures on single episode")
-    parser.add_argument("--model", choices=["act", "diffusion", "vqbet"], default="act",
-                       help="Model architecture to train")
+    # Determine available models
+    available_models = ["act", "diffusion", "vqbet"]
+    if SMOLVLA_AVAILABLE:
+        available_models.append("smolvla")
+    if PI0FAST_AVAILABLE:
+        available_models.append("pi0fast")
+    
+    parser.add_argument("--model", choices=available_models, default="act",
+                       help=f"Model architecture to train. Available: {', '.join(available_models)}")
     parser.add_argument("--dataset", default="bearlover365/red_cube_always_in_same_place", 
                        help="Dataset name/path")
     parser.add_argument("--episodes", type=str, default="0", 
@@ -604,17 +720,27 @@ def main():
     if args.batch_size is None:
         if args.cloud or torch.cuda.is_available():
             # Different models have different memory requirements
-            if args.model == "diffusion":
-                args.batch_size = 16  # Diffusion is larger
+            if args.model == "pi0fast":
+                args.batch_size = 4   # π0-FAST is very large (2.9B params)
+                accumulation_steps = 32  # High accumulation for effective batch size
+            elif args.model == "smolvla":
+                args.batch_size = 8   # SmolVLA is large (450M params)
+                accumulation_steps = 16
+            elif args.model == "diffusion":
+                args.batch_size = 16  # Diffusion is larger (263M params)
                 accumulation_steps = 8
             elif args.model == "vqbet":
-                args.batch_size = 24  # VQBet is smaller
+                args.batch_size = 24  # VQBet is smaller (38M params)
                 accumulation_steps = 4
             else:  # ACT
-                args.batch_size = 32
+                args.batch_size = 32  # ACT is small (51M params)
                 accumulation_steps = 4
         else:
-            args.batch_size = 8
+            # CPU: smaller batch sizes
+            if args.model in ["pi0fast", "smolvla"]:
+                args.batch_size = 2   # Foundation models need smaller batches on CPU
+            else:
+                args.batch_size = 8
             accumulation_steps = 1
     else:
         accumulation_steps = max(1, 128 // args.batch_size) if (args.cloud or torch.cuda.is_available()) else 1
