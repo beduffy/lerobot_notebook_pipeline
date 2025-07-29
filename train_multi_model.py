@@ -773,20 +773,22 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
             
             if cloud_mode:
                 avg_loss = np.mean(losses[-min(50, len(losses)):])
+                eta_hours = eta_min / 60
                 print(f"   Step {step:4d}/{num_steps} | "
                       f"Loss: {loss_value:.4f} | "
                       f"Avg: {avg_loss:.4f} | "
                       f"{steps_per_sec:.1f} steps/s | "
-                      f"ETA: {eta_min:.1f}min{gpu_memory_info}")
+                      f"ETA: {eta_hours:.1f}h{gpu_memory_info}")
             else:
                 avg_loss = np.mean(losses[-log_every:])
                 avg_time = np.mean(step_times[-log_every:])
+                eta_hours = eta_min / 60
                 print(f"Step {step:4d}/{num_steps} | "
                       f"Loss: {loss_value:.6f} | "
                       f"Avg Loss: {avg_loss:.6f} | "
                       f"Time/step: {avg_time:.3f}s | "
                       f"LR: {current_lr:.1e} | "
-                      f"ETA: {eta_min:.1f}min{gpu_memory_info}")
+                      f"ETA: {eta_hours:.1f}h{gpu_memory_info}")
     
     total_time = time.time() - start_time
     final_steps_per_sec = num_steps / total_time if total_time > 0 else 0
