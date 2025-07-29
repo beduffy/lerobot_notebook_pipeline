@@ -127,19 +127,33 @@ class ModelInferenceTester:
         memory_before = process.memory_info().rss / 1024 / 1024  # MB
         
         if self.device.type == "cuda":
-            gpu_memory_before = torch.cuda.memory_allocated() / 1024 / 1024  # MB
             torch.cuda.empty_cache()
+            gpu_memory_before = torch.cuda.memory_allocated() / 1024 / 1024  # MB
         else:
             gpu_memory_before = 0
+        
+        # Calculate model parameter memory (approximate)
+        param_count = sum(p.numel() for p in policy.parameters())
+        # Assume float32 parameters (4 bytes each)
+        param_memory_mb = param_count * 4 / 1024 / 1024
         
         # Cold start - first inference (often slower)
         policy.eval()
         with torch.no_grad():
-            torch.cuda.synchronize() if self.device.type == "cuda" else None
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
             cold_start = time.time()
             action = policy.select_action(obs_dict)
-            torch.cuda.synchronize() if self.device.type == "cuda" else None
+            if self.device.type == "cuda":
+                torch.cuda.synchronize()
             cold_time = time.time() - cold_start
+        
+        # Measure memory after first inference
+        memory_after_inference = process.memory_info().rss / 1024 / 1024  # MB
+        if self.device.type == "cuda":
+            gpu_memory_after_inference = torch.cuda.memory_allocated() / 1024 / 1024  # MB
+        else:
+            gpu_memory_after_inference = 0
         
         # Warm up with a few runs
         with torch.no_grad():
@@ -150,10 +164,12 @@ class ModelInferenceTester:
         times = []
         with torch.no_grad():
             for i in range(self.profile_samples):
-                torch.cuda.synchronize() if self.device.type == "cuda" else None
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize()
                 start_time = time.time()
                 action = policy.select_action(obs_dict)
-                torch.cuda.synchronize() if self.device.type == "cuda" else None
+                if self.device.type == "cuda":
+                    torch.cuda.synchronize()
                 end_time = time.time()
                 times.append(end_time - start_time)
                 
@@ -161,7 +177,7 @@ class ModelInferenceTester:
                 if i % (self.profile_samples // 4) == 0 and self.profile_samples > 50:
                     print(f"     Progress: {i}/{self.profile_samples}")
         
-        # Measure memory after
+        # Final memory measurement
         memory_after = process.memory_info().rss / 1024 / 1024  # MB
         if self.device.type == "cuda":
             gpu_memory_after = torch.cuda.memory_allocated() / 1024 / 1024  # MB
@@ -180,9 +196,9 @@ class ModelInferenceTester:
         max_fps = 1.0 / min_time  # Best case FPS
         min_fps = 1.0 / max_time  # Worst case FPS
         
-        # Memory usage
-        memory_used = memory_after - memory_before
-        gpu_memory_used = gpu_memory_after - gpu_memory_before
+        # Memory usage calculations
+        process_memory_used = memory_after_inference - memory_before
+        gpu_memory_used = gpu_memory_after_inference - gpu_memory_before
         
         performance_stats = {
             'cold_start_time': cold_time,
@@ -194,16 +210,19 @@ class ModelInferenceTester:
             'mean_fps': mean_fps,
             'max_fps': max_fps,
             'min_fps': min_fps,
-            'memory_used_mb': memory_used,
+            'process_memory_used_mb': process_memory_used,
             'gpu_memory_used_mb': gpu_memory_used,
+            'param_memory_mb': param_memory_mb,
+            'total_memory_estimate_mb': max(process_memory_used, param_memory_mb),
             'action_shape': action.shape,
             'samples': self.profile_samples
         }
         
-        # Print immediate results
+        # Print immediate results with better memory info
+        total_mem = max(process_memory_used, param_memory_mb)
         print(f"     ⚡ Mean FPS: {mean_fps:.1f} | Max FPS: {max_fps:.1f}")
         print(f"     🕐 Cold start: {cold_time*1000:.1f}ms | Warm: {mean_time*1000:.1f}±{std_time*1000:.1f}ms")
-        print(f"     💾 Memory: {memory_used:.1f}MB RAM | {gpu_memory_used:.1f}MB GPU")
+        print(f"     💾 Memory: ~{total_mem:.1f}MB | Params: {param_memory_mb:.1f}MB | GPU: {gpu_memory_used:.1f}MB")
         
         return performance_stats
     
@@ -640,7 +659,7 @@ class ModelInferenceTester:
                 mean_fps = perf.get('mean_fps', 0)
                 max_fps = perf.get('max_fps', 0)
                 cold_start = perf.get('cold_start_time', 0) * 1000  # Convert to ms
-                memory = perf.get('memory_used_mb', 0)
+                memory = perf.get('total_memory_estimate_mb', 0) # Use total_memory_estimate_mb
                 
                 print(f"{model_name:<12} {'✅ OK':<8} {params/1e6:>8.1f}M {mean_fps:>8.1f} {max_fps:>8.1f} {cold_start:>9.1f}ms {memory:>9.1f}MB")
                 

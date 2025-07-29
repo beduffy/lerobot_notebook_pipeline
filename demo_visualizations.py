@@ -30,7 +30,7 @@ import torch
 from pathlib import Path
 
 try:
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot_notebook_pipeline.dataset_utils.analysis import visualize_sample
     from lerobot_notebook_pipeline.dataset_utils.visualization import (
         plot_action_histogram, plot_all_action_histograms, 
