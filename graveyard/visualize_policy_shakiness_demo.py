@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 from collections import deque
 from pathlib import Path
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 
 class PolicyShakinessTester:
