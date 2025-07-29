@@ -573,7 +573,7 @@ def monitor_gpu_memory(step_name=""):
 
 
 def train_multi_episode(policy, dataloader, num_steps, device, model_type, config, 
-                       episodes_info, cloud_mode=False, accumulation_steps=1, checkpoint_dir=None, checkpoint_freq=5000):
+                       episodes_info, cloud_mode=False, accumulation_steps=1, checkpoint_dir=None, checkpoint_freq=1000):
     """Train policy on multiple episodes with model-specific optimizations."""
     episode_count = len(episodes_info) if isinstance(episodes_info, list) else 1
     is_vla_model = model_type in ["smolvla", "pi0fast"]  # Vision-Language-Action models
@@ -778,6 +778,7 @@ def train_multi_episode(policy, dataloader, num_steps, device, model_type, confi
                       f"Loss: {loss_value:.4f} | "
                       f"Avg: {avg_loss:.4f} | "
                       f"{steps_per_sec:.1f} steps/s | "
+                      
                       f"ETA: {eta_hours:.1f}h{gpu_memory_info}")
             else:
                 avg_loss = np.mean(losses[-log_every:])
@@ -933,8 +934,8 @@ def main():
     parser.add_argument("--no-plot", action="store_true", help="Don't show plots (save only)")
     
     # Checkpointing options
-    parser.add_argument("--checkpoint-freq", type=int, default=5000, 
-                       help="Save checkpoint every N steps (default: 5000)")
+    parser.add_argument("--checkpoint-freq", type=int, default=1000, 
+                       help="Save checkpoint every N steps (default: 1000)")
     parser.add_argument("--no-checkpoint", action="store_true", 
                        help="Disable checkpointing")
     
