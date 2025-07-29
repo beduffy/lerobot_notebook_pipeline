@@ -110,6 +110,21 @@ python train_multi_model.py --model smolvla --dataset bearlover365/red_cube_alwa
 
 **🎯 RESULTS: 5/6 models working! Foundation VLA breakthrough achieved!**
 
+## 🚀 CPU Performance Benchmarks (FPS)
+
+**Real-time Capable Models (>30 FPS):**
+- **ACT** 🎯: 2,395 FPS (~197MB RAM) - BLAZINGLY FAST! 
+- **VQBet** 🎰: 73 FPS (~144MB RAM) - Real-time capable
+
+**Moderate Performance:**
+- **SmolVLA** 🧠: 12 FPS (~1.7GB RAM) - Foundation VLA, manageable
+- **Diffusion** 🌊: 2.5 FPS (~1GB RAM) - Slower but usable
+
+**Too Slow for Real-time on CPU:**
+- **π0-FAST** ⚡: 0.1 FPS (~11.2GB RAM) - 2.9B params, needs GPU!
+
+**🎯 Recommendation**: Use ACT or VQBet for real-time CPU deployment. Train foundation models (SmolVLA, π0-FAST) on GPU, deploy on powerful hardware.
+
 smol vla training speed updt_s:0.793 x 200 = 158.6 per 200 steps
 
 
@@ -162,7 +177,7 @@ TODO clear space on lightning and wandb,
 TODO show first and last image or resize a lot the animation and make it use less than 10Mb
 TODO maybe don't save models to wandb?
 TODO understand when voice says episode over, it stops recording then, so can I reset sock position with arm or? 
-TODO ACT and smolVLA FPS. That matters right?
+✅ COMPLETED: ACT and smolVLA FPS profiling - ACT: 2,395 FPS, SmolVLA: 11.9 FPS, all models benchmarked!
 TODO evaluate smolVLA, diffusion. 
 TODO train diffusion and compare to others
 TODO do train eval splits
