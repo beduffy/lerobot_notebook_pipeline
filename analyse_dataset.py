@@ -36,6 +36,11 @@ import sys
 import os
 from pathlib import Path
 
+# Configure headless operation
+import matplotlib
+matplotlib.use('Agg')  # Force headless backend
+os.environ['MPLBACKEND'] = 'Agg'
+
 try:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot_notebook_pipeline.dataset_utils.analysis import (
@@ -91,8 +96,8 @@ def main():
         # Load dataset
         print("📊 Loading dataset...")
         if args.dataset_path in [".", "local", "local_dataset"]:
-            # Use the working method for local datasets
-            dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+            # Use the working method for local datasets with headless backend
+            dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place", video_backend=args.video_backend)
         else:
             dataset = LeRobotDataset(args.dataset_path, root=args.root, video_backend=args.video_backend)
         print(f"✅ Dataset loaded: {len(dataset)} samples")
