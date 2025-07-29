@@ -13,6 +13,7 @@ TODO download my 10 episode model and do same analysis here, prove how much bett
 TODO ctrl c should be more safe, e.g. timer of 3 seconds for me to put hand underneath so it doesn't crash into table or go back to original safe position?
 TODO does simulate work better with so101. understand maniskill so100 example pickcube-v1 perfectly and then use that. 
 TODO XLErobot mujoco try!! 
+TODO learn lightning ai jobs task scheduler to run 5 different jobs with 5 of their own GPUs. o3 had good advice
 
 ACTUAL NEXT STEPS:
 - Train SmolVLA + pizero0.5 and groot n1.5 and see if more general, less shaky and how much it costs!
