@@ -14,6 +14,42 @@ TODO ctrl c should be more safe, e.g. timer of 3 seconds for me to put hand unde
 TODO does simulate work better with so101. understand maniskill so100 example pickcube-v1 perfectly and then use that. 
 TODO XLErobot mujoco try!! 
 
+ACTUAL NEXT STEPS:
+- Train SmolVLA + pizero0.5 and groot n1.5 and see if more general, less shaky and how much it costs!
+
+
+# other model plan
+- smolVLA
+
+white sock smolvla
+python lerobot/scripts/train.py \
+  --dataset.repo_id=bearlover365/pick_up_white_sock \
+  --policy.path=lerobot/smolvla_base \
+  --batch_size=64 \
+  --output_dir=outputs/train/pick_up_white_sock_smolvla_finetune \
+  --job_name=pick_up_white_sock_smolvla_finetune \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --dataset.video_backend=pyav
+
+smol vla updt_s:0.793 x 200 = 158.6 per 200 steps
+
+huggingface-cli upload ${HF_USER}/pick_up_white_sock_smolvla_finetune outputs/train/pick_up_white_sock_smolvla_finetune/checkpoints/last --repo-type=model
+
+
+think it needs pretrained
+huggingface-cli upload \
+      ${HF_USER}/pick_up_white_sock_smolvla_finetune \
+      outputs/train/pick_up_white_sock_smolvla_finetune/checkpoints/last/pretrained_model \
+      --repo-type=model
+
+- diffusion
+
+
+- pi 0.5
+
+- groot n1.5
+
 # document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
 
