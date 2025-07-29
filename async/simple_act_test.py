@@ -31,7 +31,7 @@ except ImportError as e:
 def create_test_observations():
     """Create simple test observations for ACT."""
     return {
-        "observation.images.front": np.random.randn(3, 224, 224).tolist(),
+        "observation.images.front": np.random.randint(0, 255, (3, 96, 96), dtype=np.uint8).tolist(),
         "observation.state": np.random.randn(6).tolist()  # Combined joint positions + gripper
     }
 
