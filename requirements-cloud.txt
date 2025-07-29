@@ -7,6 +7,11 @@ seaborn>=0.12.0
 pandas>=2.0.0
 scikit-learn>=1.3.0
 
+# FastAPI server
+websockets
+fastapi
+uvicorn
+
 # LeRobot (specific working version)
 lerobot @ git+https://github.com/huggingface/lerobot.git
 
