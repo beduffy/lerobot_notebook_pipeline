@@ -153,7 +153,20 @@ conda activate robosuite
 
 
 # Other todos
-TODO obviously the coolest goal of all would be to get some zero shot VLA to work! pizero over network or smolVLA. with fine tuning if needed but that defeats the entire purpose of VLA to me. 
+TODO obviously the coolest goal of all would be to get some zero shot VLA to work! pizero over network or smolVLA. with fine tuning if needed but that defeats the entire purpose of VLA to me.
+
+
+pytest tests/ -v --durations=5    # Show slowest 5 tests
+Current test performance:
+⚠️ test_analysis_script_integration - 75.7s (slowest!)
+⚠️ test_single_episode_experiment_config - 48.8s
+🐌 test_analysis_functions - 24.6s
+🐌 test_plot_action_histogram - 21.0s
+✅ test_visualization_functions - 2.9s (fast)
+
+Consider marking slow tests with @pytest.mark.slow for faster development cycles
+
+
 TODO clear space on lightning and wandb, 
 TODO show first and last image or resize a lot the animation and make it use less than 10Mb
 TODO maybe don't save models to wandb?
