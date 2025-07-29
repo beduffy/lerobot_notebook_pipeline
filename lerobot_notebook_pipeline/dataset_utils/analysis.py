@@ -1,5 +1,5 @@
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 import matplotlib.pyplot as plt
 import numpy as np
 import time

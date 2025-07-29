@@ -37,7 +37,7 @@ import os
 from pathlib import Path
 
 try:
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot_notebook_pipeline.dataset_utils.analysis import (
         get_dataset_stats, analyze_episodes, analyze_overfitting_risk, 
         analyze_action_patterns, visualize_sample

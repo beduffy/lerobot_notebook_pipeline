@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 try:
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, analyze_episodes
     from lerobot_notebook_pipeline.dataset_utils.training import train_model
     from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise

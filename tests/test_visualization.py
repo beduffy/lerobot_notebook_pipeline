@@ -2,7 +2,7 @@ import pytest
 import torch
 from torchvision import transforms
 import matplotlib.pyplot as plt
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from lerobot_notebook_pipeline.dataset_utils.visualization import AddGaussianNoise, visualize_augmentations, plot_action_histogram
 

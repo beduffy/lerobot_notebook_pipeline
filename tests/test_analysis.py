@@ -1,5 +1,5 @@
 import pytest
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot_notebook_pipeline.dataset_utils.analysis import get_dataset_stats, visualize_sample
 import matplotlib.pyplot as plt
 import torch

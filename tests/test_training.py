@@ -1,8 +1,8 @@
 import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from lerobot.common.policies.act.modeling_act import ACTPolicy
-from lerobot.common.policies.act.configuration_act import ACTConfig
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot_notebook_pipeline.dataset_utils.training import train_model
 
 class MockPolicy(torch.nn.Module):
