@@ -18,10 +18,47 @@ ACTUAL NEXT STEPS:
 - Train SmolVLA + pizero0.5 and groot n1.5 and see if more general, less shaky and how much it costs!
 
 
-# other model plan
-- smolVLA
+# 🚀 Foundation Model Plan - VLAs & Advanced Architectures
 
-white sock smolvla
+## 🧠 Foundation Models (TOP PRIORITY)
+
+### **NVIDIA GROOT N1.5** 🔥
+**World's first open foundation model for generalist humanoid robot reasoning!**
+
+- **Source**: [NVIDIA Isaac-GR00T](https://github.com/NVIDIA/Isaac-GR00T)
+- **Model**: Available on [Hugging Face](https://huggingface.co/blog/nvidia/gr00t-n1-5-so101-tuning)
+- **Compatibility**: ✅ **Works with SO-101 arms** (your hardware!)
+- **Key Features**:
+  - Cross-embodiment model (works across different robots)
+  - Processes multimodal inputs (language + images)
+  - EmbodimentTag system for different robot platforms
+  - Post-training/fine-tuning with LeRobot datasets
+  - Language-conditioned manipulation tasks
+
+**Quick Start Commands**:
+```bash
+# Installation
+git clone https://github.com/NVIDIA/Isaac-GR00T
+conda create -n gr00t python=3.10
+conda activate gr00t
+pip install -e .[base]
+
+# Fine-tune on your red cube dataset
+python scripts/gr00t_finetune.py \
+   --dataset-path bearlover365/red_cube_always_in_same_place \
+   --num-gpus 1 \
+   --output-dir ./groot-red-cube \
+   --max-steps 10000 \
+   --data-config so100_dualcam
+```
+
+### **SmolVLA** 🧠  
+- **Status**: ⚠️ Dependency issues (numpy/transformers conflict) - FIXING NOW
+- **Priority**: HIGH - VLA foundation model
+- **Previous training**: ✅ Working, inference issues
+
+```bash
+# Previous working training command
 python lerobot/scripts/train.py \
   --dataset.repo_id=bearlover365/pick_up_white_sock \
   --policy.path=lerobot/smolvla_base \
@@ -31,6 +68,46 @@ python lerobot/scripts/train.py \
   --policy.device=cuda \
   --wandb.enable=true \
   --dataset.video_backend=pyav
+```
+
+### **PI0Fast (Pi Zero 0.5)** 🥧
+- **Status**: ⚠️ GemmaForCausalLM import issues - FIXING NOW  
+- **Priority**: HIGH - Lightweight VLA
+- **Target**: Fast inference for real-time robotics
+
+## 🤖 Other Architectures
+
+### **Diffusion Policy** 🌊
+- **Status**: ✅ **WORKING** (inference + training)
+- **Parameters**: 263M
+- **Performance**: Good training convergence
+
+### **ACT** 🎯
+- **Status**: ✅ **WORKING** (your proven baseline)
+- **Parameters**: 51M  
+- **Performance**: Excellent, fast training
+
+### **VQBet** 🎰  
+- **Status**: ✅ Working inference, ⚠️ training import issues
+- **Parameters**: 38M
+- **Priority**: Lower (not foundation model)
+
+## 🎯 Next Steps Foundation Model Testing
+
+1. **GROOT N1.5**: Clone repo, test with your red cube dataset
+2. **SmolVLA**: Fix numpy dependency conflicts
+3. **PI0Fast**: Fix GemmaForCausalLM imports  
+4. **Compare all VLAs**: GROOT vs SmolVLA vs PI0Fast on same task
+
+## 📊 Foundation Model Comparison Matrix
+
+| Model | Type | Parameters | Status | Language Input | Multi-Embodiment |
+|-------|------|------------|--------|----------------|-------------------|
+| **GROOT N1.5** | Foundation VLA | Large | 🔄 To Add | ✅ Yes | ✅ Yes |
+| **SmolVLA** | Compact VLA | Medium | ⚠️ Fixing | ✅ Yes | ✅ Yes |
+| **PI0Fast** | Fast VLA | Small | ⚠️ Fixing | ✅ Yes | ✅ Yes |
+| ACT | Imitation | 51M | ✅ Working | ❌ No | ❌ No |
+| Diffusion | Imitation | 263M | ✅ Working | ❌ No | ❌ No |
 
 smol vla updt_s:0.793 x 200 = 158.6 per 200 steps
 
@@ -43,12 +120,6 @@ huggingface-cli upload \
       outputs/train/pick_up_white_sock_smolvla_finetune/checkpoints/last/pretrained_model \
       --repo-type=model
 
-- diffusion
-
-
-- pi 0.5
-
-- groot n1.5
 
 # document
 This document outlines the plan for developing the `lerobot_notebook_pipeline` repository.
