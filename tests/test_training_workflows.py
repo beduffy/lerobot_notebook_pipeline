@@ -201,7 +201,7 @@ def test_single_episode_dry_run():
                 "bearlover365/red_cube_always_in_same_place",
                 "--episode", "0",
                 "--output-dir", tmp_dir,
-                "--training-steps", "10"  # Very short for testing
+                "--steps", "10"  # Very short for testing
             ],
             timeout=60
         )

@@ -297,13 +297,21 @@ def test_memory_usage_workflow():
         # Create model
         from lerobot.policies.act.modeling_act import ACTPolicy
         from lerobot.policies.act.configuration_act import ACTConfig
+        from lerobot.datasets.utils import dataset_to_policy_features
+        from lerobot.configs.types import FeatureType
         
-        config = ACTConfig()
-        config.input_shapes = {
-            "observation.state": [6],
-            "observation.images.front": [3, 96, 96]
-        }
-        config.output_shapes = {"action": [6]}
+        # Use dataset metadata for proper configuration
+        features = dataset_to_policy_features(dataset.features)
+        output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+        input_features = {key: ft for key, ft in features.items() if key not in output_features}
+        
+        config = ACTConfig(
+            input_features=input_features,
+            output_features=output_features,
+            n_obs_steps=1,
+            n_action_steps=1,
+            chunk_size=1
+        )
         
         policy = ACTPolicy(config)
         
