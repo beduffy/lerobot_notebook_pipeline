@@ -35,8 +35,11 @@ MUJOCO_LOG.TXT
 # TODO but maybe the below two shouldn't even be tere
 meta/
 videos/
+
+# TODO IDEALLY we could just put all into a model folder but then things might break. done test!
 data_collection_logs/
 single_episode_experiments/
 single_episode_model/
 single_episode_model_20k_steps/
 red_cube_40k_steps_10_episodes/
+models/
