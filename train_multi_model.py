@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """
-Multi-Model Training Script
+Multi-Model Training Script with Episode Slicing Support
 
-Extended version of train_single_episode.py that supports multiple architectures:
+Extended version of train_single_episode.py that supports multiple architectures and multi-episode training:
 - ACT (proven working)
-- Diffusion Policy (working)
+- Diffusion Policy (working)  
 - VQBet (working)
 
-Usage:
-    # Train ACT (your baseline)
-    python train_multi_model.py --model act --episode 0 --steps 1000
+Episode Selection Examples:
+    # Single episode
+    python train_multi_model.py --model act --episodes 0 --steps 1000
     
-    # Train Diffusion Policy
-    python train_multi_model.py --model diffusion --episode 0 --steps 1000
+    # Multiple specific episodes
+    python train_multi_model.py --model diffusion --episodes 1,4,7 --steps 1000
     
-    # Train VQBet  
-    python train_multi_model.py --model vqbet --episode 0 --steps 1000
+    # Episode range (slice notation)
+    python train_multi_model.py --model vqbet --episodes 0:5 --steps 1000  # First 5 episodes
+    python train_multi_model.py --model act --episodes 2: --steps 1000     # From episode 2 to end
+    python train_multi_model.py --model diffusion --episodes :3 --steps 1000  # First 3 episodes
     
-    # Compare all models with same episode/steps
-    python train_multi_model.py --model act --episode 0 --steps 500 --output-dir ./models/act_ep0_500
-    python train_multi_model.py --model diffusion --episode 0 --steps 500 --output-dir ./models/diffusion_ep0_500  
-    python train_multi_model.py --model vqbet --episode 0 --steps 500 --output-dir ./models/vqbet_ep0_500
+    # All episodes
+    python train_multi_model.py --model act --episodes all --steps 1000
+    
+Model Comparison Examples:
+    # Compare all models on same data
+    python train_multi_model.py --model act --episodes 0:5 --steps 500 --output-dir ./models/act_first5_500
+    python train_multi_model.py --model diffusion --episodes 0:5 --steps 500 --output-dir ./models/diffusion_first5_500  
+    python train_multi_model.py --model vqbet --episodes 0:5 --steps 500 --output-dir ./models/vqbet_first5_500
 """
 
 import argparse
@@ -82,8 +88,76 @@ def get_single_episode_indices(dataset: LeRobotDataset, episode_idx: int) -> lis
     return list(range(from_idx, to_idx))
 
 
-def create_single_episode_dataset(dataset_name: str, episode_idx: int, video_backend: str = "pyav"):
-    """Create dataset containing only one episode."""
+def parse_episodes(episodes_str: str, total_episodes: int) -> list:
+    """Parse episode specification into list of episode indices.
+    
+    Supports:
+    - Single episode: "3"
+    - Multiple episodes: "1,4,7"
+    - Slice notation: "0:5", "1:", ":3"
+    - All episodes: "all"
+    
+    Returns:
+        List of episode indices
+    """
+    episodes_str = episodes_str.strip()
+    
+    # Handle "all" keyword
+    if episodes_str.lower() == "all":
+        return list(range(total_episodes))
+    
+    # Handle slice notation (e.g., "0:5", "1:", ":3")
+    if ":" in episodes_str:
+        parts = episodes_str.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid slice notation: {episodes_str}")
+        
+        start_str, end_str = parts
+        start = int(start_str) if start_str else 0
+        end = int(end_str) if end_str else total_episodes
+        
+        # Validate bounds
+        start = max(0, min(start, total_episodes))
+        end = max(0, min(end, total_episodes))
+        
+        if start >= end:
+            raise ValueError(f"Invalid slice: start ({start}) >= end ({end})")
+            
+        return list(range(start, end))
+    
+    # Handle comma-separated episodes (e.g., "1,4,7")
+    if "," in episodes_str:
+        try:
+            episodes = [int(x.strip()) for x in episodes_str.split(",")]
+            # Validate all episodes are in bounds
+            for ep in episodes:
+                if ep < 0 or ep >= total_episodes:
+                    raise ValueError(f"Episode {ep} out of bounds (0-{total_episodes-1})")
+            return sorted(list(set(episodes)))  # Remove duplicates and sort
+        except ValueError as e:
+            raise ValueError(f"Invalid episode list: {episodes_str}") from e
+    
+    # Handle single episode
+    try:
+        episode_idx = int(episodes_str)
+        if episode_idx < 0 or episode_idx >= total_episodes:
+            raise ValueError(f"Episode {episode_idx} out of bounds (0-{total_episodes-1})")
+        return [episode_idx]
+    except ValueError as e:
+        raise ValueError(f"Invalid episode specification: {episodes_str}") from e
+
+
+def get_multi_episode_indices(dataset: LeRobotDataset, episode_indices: list) -> list:
+    """Get all data indices for multiple episodes."""
+    all_indices = []
+    for episode_idx in episode_indices:
+        episode_data = get_single_episode_indices(dataset, episode_idx)
+        all_indices.extend(episode_data)
+    return all_indices
+
+
+def create_multi_episode_dataset(dataset_name: str, episodes_spec: str, video_backend: str = "pyav"):
+    """Create dataset containing specified episodes."""
     print(f"📊 Loading dataset: {dataset_name}")
     
     # Load metadata first
@@ -91,21 +165,35 @@ def create_single_episode_dataset(dataset_name: str, episode_idx: int, video_bac
     print(f"   Total episodes: {metadata.total_episodes}")
     print(f"   Total frames: {metadata.total_frames}")
     
+    # Parse episode specification
+    episode_indices = parse_episodes(episodes_spec, metadata.total_episodes)
+    print(f"🎯 Selected episodes: {episode_indices}")
+    
     # Load full dataset
     full_dataset = LeRobotDataset(dataset_name, video_backend=video_backend)
     
-    # Get indices for the specific episode
-    episode_indices = get_single_episode_indices(full_dataset, episode_idx)
-    episode_length = len(episode_indices)
+    # Get indices for all specified episodes
+    all_data_indices = get_multi_episode_indices(full_dataset, episode_indices)
+    total_length = len(all_data_indices)
     
-    print(f"🎯 Episode {episode_idx}:")
-    print(f"   Frame indices: {episode_indices[0]} to {episode_indices[-1]}")
-    print(f"   Episode length: {episode_length} steps")
+    print(f"📈 Training Data Summary:")
+    print(f"   Episodes: {len(episode_indices)} episodes")
+    print(f"   Frame indices: {all_data_indices[0]} to {all_data_indices[-1]}")
+    print(f"   Total training steps: {total_length}")
     
-    # Create subset dataset with only this episode
-    single_episode_dataset = Subset(full_dataset, episode_indices)
+    # Show per-episode breakdown
+    if len(episode_indices) <= 10:  # Only show details for <= 10 episodes
+        for ep_idx in episode_indices:
+            ep_data = get_single_episode_indices(full_dataset, ep_idx)
+            print(f"   Episode {ep_idx}: {len(ep_data)} steps")
+    else:
+        avg_length = total_length // len(episode_indices)
+        print(f"   Average episode length: ~{avg_length} steps")
     
-    return full_dataset, single_episode_dataset, metadata, episode_length
+    # Create subset dataset with selected episodes
+    multi_episode_dataset = Subset(full_dataset, all_data_indices)
+    
+    return full_dataset, multi_episode_dataset, metadata, total_length, episode_indices
 
 
 def setup_act_policy(input_features, output_features, metadata):
@@ -212,10 +300,10 @@ def setup_policy_and_config(model_type: str, metadata):
     return policy, config, delta_timestamps
 
 
-def create_dataloader(full_dataset, single_episode_indices, delta_timestamps, batch_size=8, 
+def create_dataloader(full_dataset, multi_episode_indices, delta_timestamps, batch_size=8, 
                      num_workers=None, video_backend="pyav"):
-    """Create dataloader for single episode training."""
-    print(f"\n📦 Creating single-episode dataloader...")
+    """Create dataloader for multi-episode training."""
+    print(f"\n📦 Creating multi-episode dataloader...")
     
     # Auto-adjust num_workers based on environment
     if num_workers is None:
@@ -231,23 +319,24 @@ def create_dataloader(full_dataset, single_episode_indices, delta_timestamps, ba
         video_backend=video_backend
     )
     
-    # Create subset for our episode
-    single_episode_dataset = Subset(dataset_with_config, single_episode_indices)
+    # Create subset for our episodes
+    multi_episode_dataset = Subset(dataset_with_config, multi_episode_indices)
     
     # Create dataloader
     dataloader = DataLoader(
-        single_episode_dataset,
+        multi_episode_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=True,  # Shuffle across all episodes for better training
         num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
         drop_last=False
     )
     
-    print(f"   Episode length: {len(single_episode_dataset)} steps")
+    print(f"   Total training steps: {len(multi_episode_dataset)}")
     print(f"   Batch size: {batch_size}")
     print(f"   Batches per epoch: {len(dataloader)}")
     print(f"   Workers: {num_workers}")
+    print(f"   Data shuffling: ✅ Enabled (mixed episode training)")
     
     return dataloader
 
@@ -280,10 +369,11 @@ def get_optimizer_config(model_type: str, config):
         }
 
 
-def train_single_episode(policy, dataloader, num_steps, device, model_type, config, 
-                        cloud_mode=False, accumulation_steps=1):
-    """Train policy on single episode with model-specific optimizations."""
-    print(f"\n🚀 Starting {model_type.upper()} training...")
+def train_multi_episode(policy, dataloader, num_steps, device, model_type, config, 
+                       episodes_info, cloud_mode=False, accumulation_steps=1):
+    """Train policy on multiple episodes with model-specific optimizations."""
+    episode_count = len(episodes_info) if isinstance(episodes_info, list) else 1
+    print(f"\n🚀 Starting {model_type.upper()} training on {episode_count} episodes...")
     
     # Get optimizer config for this model type
     opt_config = get_optimizer_config(model_type, config)
@@ -407,7 +497,7 @@ def train_single_episode(policy, dataloader, num_steps, device, model_type, conf
     return losses
 
 
-def save_model(policy, save_dir, model_type, episode_idx, final_loss):
+def save_model(policy, save_dir, model_type, episode_indices, final_loss):
     """Save the trained model with model type info."""
     save_path = Path(save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -420,7 +510,8 @@ def save_model(policy, save_dir, model_type, episode_idx, final_loss):
     # Save training info
     info = {
         "model_type": model_type,
-        "episode_index": episode_idx,
+        "episode_indices": episode_indices,
+        "num_episodes": len(episode_indices),
         "final_loss": final_loss,
         "training_completed": True,
         "parameters": sum(p.numel() for p in policy.parameters())
@@ -431,22 +522,38 @@ def save_model(policy, save_dir, model_type, episode_idx, final_loss):
         json.dump(info, f, indent=2)
     
     print(f"   ✅ {model_type.upper()} model saved successfully!")
+    print(f"   Trained on {len(episode_indices)} episodes: {episode_indices}")
     return save_path
 
 
-def plot_training_progress(losses, model_type, save_path=None, show_plot=True):
+def plot_training_progress(losses, model_type, save_path=None, show_plot=True, episode_info=None):
     """Plot training loss curve with model info."""
     plt.figure(figsize=(10, 6))
     plt.plot(losses)
-    plt.title(f"Training Loss - {model_type.upper()} (Single Episode)")
+    
+    # Create title with episode information
+    if episode_info and len(episode_info) > 1:
+        if len(episode_info) <= 5:
+            episode_str = f"Episodes {episode_info}"
+        else:
+            episode_str = f"{len(episode_info)} Episodes ({episode_info[0]}-{episode_info[-1]})"
+    elif episode_info:
+        episode_str = f"Episode {episode_info[0]}"
+    else:
+        episode_str = "Multi-Episode"
+    
+    plt.title(f"Training Loss - {model_type.upper()} ({episode_str})")
     plt.xlabel("Training Step")
     plt.ylabel("Loss")
     plt.grid(True, alpha=0.3)
     
     # Add model info to plot
-    params = len(losses)
     final_loss = losses[-1] if losses else 0
-    plt.text(0.02, 0.98, f'Model: {model_type.upper()}\nFinal Loss: {final_loss:.4f}', 
+    info_text = f'Model: {model_type.upper()}\nFinal Loss: {final_loss:.4f}'
+    if episode_info:
+        info_text += f'\nEpisodes: {len(episode_info)}'
+    
+    plt.text(0.02, 0.98, info_text, 
              transform=plt.gca().transAxes, verticalalignment='top',
              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
@@ -466,7 +573,8 @@ def main():
                        help="Model architecture to train")
     parser.add_argument("--dataset", default="bearlover365/red_cube_always_in_same_place", 
                        help="Dataset name/path")
-    parser.add_argument("--episode", type=int, default=0, help="Episode index to train on")
+    parser.add_argument("--episodes", type=str, default="0", 
+                       help="Episodes to train on. Examples: '0' (single), '0:5' (slice), '1,4,7' (specific), 'all' (all episodes)")
     parser.add_argument("--steps", type=int, default=1000, help="Training steps")
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size (auto if not set)")
     parser.add_argument("--output-dir", default=None, help="Save directory (auto if not set)")
@@ -483,7 +591,11 @@ def main():
     
     # Auto-configure output directory
     if args.output_dir is None:
-        args.output_dir = f"./models/{args.model}_episode_{args.episode}_{args.steps}steps"
+        # Create descriptive output directory name
+        episodes_desc = args.episodes.replace(":", "_").replace(",", "_")
+        if episodes_desc == "all":
+            episodes_desc = "all_episodes"
+        args.output_dir = f"./models/{args.model}_episodes_{episodes_desc}_{args.steps}steps"
     
     # Setup environment
     env_mode = setup_environment(args.cloud)
@@ -515,7 +627,7 @@ def main():
     print(f"Model: {args.model.upper()}")
     print(f"Environment: {env_mode}")
     print(f"Dataset: {args.dataset}")
-    print(f"Episode: {args.episode}")
+    print(f"Episodes: {args.episodes}")
     print(f"Training steps: {args.steps}")
     print(f"Batch size: {args.batch_size}")
     print(f"Device: {device}")
@@ -528,7 +640,7 @@ def main():
             config={
                 "model": args.model,
                 "dataset": args.dataset,
-                "episode": args.episode,
+                "episodes": args.episodes,
                 "steps": args.steps,
                 "batch_size": args.batch_size,
                 "environment": env_mode
@@ -537,26 +649,26 @@ def main():
         print("📊 W&B logging enabled")
     
     try:
-        # 1. Create single episode dataset
-        full_dataset, single_ep_dataset, metadata, episode_length = create_single_episode_dataset(
-            args.dataset, args.episode, args.video_backend
+        # 1. Create multi-episode dataset
+        full_dataset, multi_ep_dataset, metadata, total_length, episode_indices = create_multi_episode_dataset(
+            args.dataset, args.episodes, args.video_backend
         )
         
-        # Get episode indices for dataloader
-        episode_indices = get_single_episode_indices(full_dataset, args.episode)
+        # Get data indices for dataloader
+        all_data_indices = get_multi_episode_indices(full_dataset, episode_indices)
         
         # 2. Setup policy based on model type
         policy, config, delta_timestamps = setup_policy_and_config(args.model, metadata)
         
         # 3. Create dataloader
         dataloader = create_dataloader(
-            full_dataset, episode_indices, delta_timestamps, 
+            full_dataset, all_data_indices, delta_timestamps, 
             args.batch_size, video_backend=args.video_backend
         )
         
         # 4. Train
-        losses = train_single_episode(
-            policy, dataloader, args.steps, device, args.model, config,
+        losses = train_multi_episode(
+            policy, dataloader, args.steps, device, args.model, config, episode_indices,
             cloud_mode=args.cloud, accumulation_steps=accumulation_steps
         )
         
@@ -564,15 +676,21 @@ def main():
         if args.wandb and WANDB_AVAILABLE:
             for i, loss in enumerate(losses):
                 wandb.log({"loss": loss, "step": i})
+            # Log additional metadata
+            wandb.log({
+                "num_episodes": len(episode_indices),
+                "total_training_steps": total_length,
+                "episode_indices": episode_indices
+            })
         
         # 5. Save model
-        save_path = save_model(policy, args.output_dir, args.model, args.episode, losses[-1])
+        save_path = save_model(policy, args.output_dir, args.model, episode_indices, losses[-1])
         
         # 6. Plot results
-        plot_training_progress(losses, args.model, save_path, show_plot=not args.no_plot)
+        plot_training_progress(losses, args.model, save_path, show_plot=not args.no_plot, episode_info=episode_indices)
         
         print(f"\n🎉 {args.model.upper()} TRAINING COMPLETE!")
-        print(f"   Episode {args.episode} trained for {args.steps} steps")
+        print(f"   Episodes {episode_indices} trained for {args.steps} steps")
         print(f"   Final loss: {losses[-1]:.6f}")
         print(f"   Model saved to: {save_path}")
         
