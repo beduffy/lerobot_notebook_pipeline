@@ -12,6 +12,8 @@ websockets
 fastapi
 uvicorn
 
+num2words
+
 # LeRobot (specific working version)
 lerobot @ git+https://github.com/huggingface/lerobot.git
 
