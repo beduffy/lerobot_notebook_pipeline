@@ -8,7 +8,7 @@ try:
     checkpoint_path = "models/smolvla_episodes_0_10_40000steps/checkpoint_step_1000.pt"
     print(f"Loading checkpoint from: {checkpoint_path}")
     
-    checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
     print("Successfully loaded checkpoint!")
     print("Keys:", list(checkpoint.keys()))
     
