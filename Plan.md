@@ -61,6 +61,33 @@ python scripts/gr00t_finetune.py \
 - **Language Commands**: "grab red cube and put to left"
 - **Features**: Compact foundation model, language-conditioned manipulation
 
+From the paper:
+4.3 Implementation details.
+We conduct our experiments using LeRobot (Cadene et al., 2024), a PyTorch-based framework for real-world robotics.
+During pretraining, we train for 200,000 steps with a global batch size of 256 on all our community datasets. After
+a 100-step warmup, we use a cosine learning rate schedule starting at 1e-4 and decaying to a minimum of 2.5e-6.
+We use the AdamW optimizer with β1 = 0.9, β2 = 0.95. Training is performed after resizing the images to 512×512,
+for consistency with the VLM input size. We use SmolVLM-2 (Marafioti et al., 2025) as our VLM backbone. The
+action expert is trained with flow matching to output chunks of n = 50 actions. For real-world evaluation, we
+perform synchronous inference: the model samples new observations only after executing the full chunk of actions.
+In simulation, we perform inference by sampling new observations and predicting a new action after each executed
+action. During inference, the flow matching is fixed to 10 steps. We train only the action expert module, keeping the
+VLM frozen. Our main model, contains 450 million parameters, with approximately 100 million dedicated to the
+action expert. We use only the first 16 layers of the large language model (LLM) within the VLM. For fine-tuning on
+simulation benchmarks, we train for 100,000 steps with a batch size of 64, while for real-world tasks, we fine-tune for
+200,000 steps. However, we observe in practice that the model can be trained for a much smaller number of steps
+without sacrificing significant performance levels.
+Beyond maintaining a compact model and a reduced number of tokens, we employ several optimizations to enhance
+training efficiency. Specifically, we leverage bfloat16 precision and torch.compile() (Paszke, 2019) that JITcompiles PyTorch code into optimized kernels. To ensure compatibility with these optimizations, we maintain a fixed
+sequence length and batch size, discarding any excess frames in an episode that do not fit a complete batch. For
+multi-GPU and multi-node training, we utilize Hugging Face’s accelerate (Gugger et al., 2022) library with mixed
+precision, providing a scalable and memory-efficient training setup. Pretraining was conducted using 4 GPUs to
+accomodate for large batch size, but the model can easily be trained on a single GPU due to its small size. Overall,
+the project consumed approximately 30k GPU hours.
+
+TODO if 6 hours or whatever use 18 euro, and that was 4k steps or? Can I get to 50k steps without spending. Why does it train so slow? will training on one episode be better? how much will it cost?
+ TODO running smolVLA in sim, seems it stops and starts, processing chunk or whatever. should try the async inference. but it seems to mostly follow. one action takes 5 seconds, the rest are fast, why?
+
 ```bash
 # Test inference (WORKING!)
 python test_model_inference.py --models smolvla --dataset bearlover365/red_cube_always_in_same_place
