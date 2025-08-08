@@ -22,6 +22,24 @@ Usage:
     python simulate_robot_control.py --steps 10 --speed 2.0 --no-visualization
 """
 
+import warnings
+import os
+
+# Suppress common warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+# Suppress TensorFlow logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# Suppress JAX warnings
+os.environ['JAX_PLATFORM_NAME'] = 'cpu'
+
+# Suppress TensorFlow warnings
+import logging
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
 import argparse
 import time
 import numpy as np
@@ -30,6 +48,8 @@ import matplotlib.pyplot as plt
 from collections import deque
 from pathlib import Path
 import json
+import threading
+from queue import Queue, Empty
 
 try:
     import mujoco
@@ -71,9 +91,33 @@ except ImportError:
 
 
 def detect_model_type(model_path):
-    """Detect model type from model directory."""
+    """Detect model type from model directory or checkpoint file."""
     model_path = Path(model_path)
     
+    # Handle checkpoint files (.pt, .pth, .ckpt)
+    if model_path.suffix in ['.pt', '.pth', '.ckpt']:
+        print("[INFO] Detected checkpoint file: {}".format(model_path))
+        # For checkpoint files, we need to try loading with different model types
+        # or use a naming convention to detect type
+        model_name = model_path.name.lower()
+        if 'smolvla' in model_name or 'vla' in model_name:
+            return 'smolvla'
+        elif 'act' in model_name:
+            return 'act'
+        elif 'diffusion' in model_name:
+            return 'diffusion'
+        elif 'vqbet' in model_name:
+            return 'vqbet'
+        elif 'pi0fast' in model_name or 'pi0' in model_name:
+            return 'pi0fast'
+        else:
+            # Default to SmolVLA for checkpoint files if available
+            if SMOLVLA_AVAILABLE:
+                return 'smolvla'
+            else:
+                return 'act'
+    
+    # Handle directory-based models
     # Check for training_info.json first
     info_path = model_path / "training_info.json"
     if info_path.exists():
@@ -145,22 +189,96 @@ def load_policy(model_path, model_type):
     """Load policy based on model type."""
     print(f"🧠 Loading {model_type.upper()} policy from {model_path}...")
     
-    if model_type == 'act':
-        policy = ACTPolicy.from_pretrained(model_path)
-    elif model_type == 'diffusion':
-        policy = DiffusionPolicy.from_pretrained(model_path)
-    elif model_type == 'vqbet':
-        policy = VQBeTPolicy.from_pretrained(model_path)
-    elif model_type == 'smolvla':
-        if not SMOLVLA_AVAILABLE:
-            raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
-        policy = SmolVLAPolicy.from_pretrained(model_path)
-    elif model_type == 'pi0fast':
-        if not PI0FAST_AVAILABLE:
-            raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
-        policy = PI0FASTPolicy.from_pretrained(model_path)
+    model_path = Path(model_path)
+    
+    # Handle checkpoint files
+    if model_path.suffix in ['.pt', '.pth', '.ckpt']:
+        print(f"📁 Loading from checkpoint file: {model_path}")
+        
+        if model_type == 'smolvla':
+            if not SMOLVLA_AVAILABLE:
+                raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+            # For SmolVLA checkpoint files, we need to load the model differently
+            try:
+                # Check if this is a directory with config files
+                if model_path.is_dir():
+                    # Load from directory with config
+                    policy = SmolVLAPolicy.from_pretrained(str(model_path))
+                else:
+                    # For checkpoint files, try to load from a model subdirectory
+                    model_dir = model_path.parent / "model"
+                    if model_dir.exists():
+                        print(f"📁 Loading from model directory: {model_dir}")
+                        policy = SmolVLAPolicy.from_pretrained(str(model_dir))
+                    else:
+                        # Create a minimal SmolVLA policy and load checkpoint
+                        print("⚠️  No model directory found, creating base SmolVLA policy...")
+                        # We need to create a policy with the right config
+                        # For now, let's try to load the checkpoint directly
+                        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+                        
+                        # Create policy with config from checkpoint
+                        if 'config' in checkpoint:
+                            config = checkpoint['config']
+                            policy = SmolVLAPolicy(config)
+                        else:
+                            # Fallback: create with default config
+                            policy = SmolVLAPolicy()
+                        
+                        # Load the checkpoint weights
+                        if 'model_state_dict' in checkpoint:
+                            policy.load_state_dict(checkpoint['model_state_dict'])
+                        elif 'state_dict' in checkpoint:
+                            policy.load_state_dict(checkpoint['state_dict'])
+                        else:
+                            policy.load_state_dict(checkpoint)
+                    
+            except Exception as e:
+                print(f"⚠️  Config parsing failed, using fallback loading...")
+                # Alternative: try to load directly with weights_only=False
+                checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+                if 'config' in checkpoint:
+                    config = checkpoint['config']
+                    policy = SmolVLAPolicy(config)
+                    if 'model_state_dict' in checkpoint:
+                        policy.load_state_dict(checkpoint['model_state_dict'])
+                    else:
+                        policy.load_state_dict(checkpoint, strict=False)
+                    print("✅ SmolVLA loaded successfully via fallback method")
+                else:
+                    raise RuntimeError("No config found in checkpoint")
+                
+        elif model_type == 'act':
+            policy = ACTPolicy.from_pretrained(model_path)
+        elif model_type == 'diffusion':
+            policy = DiffusionPolicy.from_pretrained(model_path)
+        elif model_type == 'vqbet':
+            policy = VQBeTPolicy.from_pretrained(model_path)
+        elif model_type == 'pi0fast':
+            if not PI0FAST_AVAILABLE:
+                raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+            policy = PI0FASTPolicy.from_pretrained(model_path)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
+    
     else:
-        raise ValueError(f"Unsupported model type: {model_type}")
+        # Handle directory-based models
+        if model_type == 'act':
+            policy = ACTPolicy.from_pretrained(model_path)
+        elif model_type == 'diffusion':
+            policy = DiffusionPolicy.from_pretrained(model_path)
+        elif model_type == 'vqbet':
+            policy = VQBeTPolicy.from_pretrained(model_path)
+        elif model_type == 'smolvla':
+            if not SMOLVLA_AVAILABLE:
+                raise RuntimeError("SmolVLA not available. Install with updated LeRobot version.")
+            policy = SmolVLAPolicy.from_pretrained(model_path)
+        elif model_type == 'pi0fast':
+            if not PI0FAST_AVAILABLE:
+                raise RuntimeError("π0-FAST not available. Install with updated LeRobot version.")
+            policy = PI0FASTPolicy.from_pretrained(model_path)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
     
     return policy
 
@@ -168,8 +286,17 @@ def load_policy(model_path, model_type):
 class RobotControlSimulator:
     """Simulates robot control with real images and policy predictions."""
     
-    def __init__(self, policy_path, dataset_name, episode_idx=0, start_step=0, device="auto", camera_remap=None):
+    def __init__(self, policy_path, dataset_name, episode_idx=0, start_step=0, device="auto", camera_remap=None, async_inference=False, prefetch_margin=10):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else torch.device(device)
+        
+        # If CPU, limit threads for stability
+        try:
+            if self.device.type == "cpu":
+                import os as _os
+                torch.set_num_threads(min(8, max(1, (_os.cpu_count() or 8))))
+                torch.set_num_interop_threads(1)
+        except Exception:
+            pass
         
         # Detect model type
         self.model_type = detect_model_type(policy_path)
@@ -182,6 +309,17 @@ class RobotControlSimulator:
         self.policy.to(self.device)
         self.policy.reset()
         print("Policy loaded!")
+        
+        # Async inference setup
+        self.async_inference = async_inference
+        self.prefetch_margin = max(0, int(prefetch_margin))
+        if async_inference and self.model_type in ["smolvla", "pi0fast"]:
+            print("🔄 Enabling asynchronous inference mode")
+            self.action_buffer = []
+            self.buffer_index = 0
+            self.next_action_buffer = None
+            self._prefetch_thread = None
+            self._prefetch_lock = threading.Lock()
         
         # Load dataset
         print(f"Loading dataset {dataset_name}...")
@@ -214,6 +352,10 @@ class RobotControlSimulator:
                             remapped_batch[key] = value
                     
                     return remapped_batch
+                
+                # Forward all attributes to the original dataset
+                def __getattr__(self, name):
+                    return getattr(self.dataset, name)
             
             self.dataset = CameraRemapDataset(self.dataset, camera_remap)
         
@@ -248,48 +390,37 @@ class RobotControlSimulator:
         self.mujoco_joint_indices = None
         if MUJOCO_AVAILABLE:
             self._setup_mujoco()
-        
+
     def _load_episode_data(self):
-        """Load episode boundaries."""
-        from_idx = self.dataset.episode_data_index["from"][self.episode_idx].item()
-        to_idx = self.dataset.episode_data_index["to"][self.episode_idx].item()
+        """Load episode start/end indices and length from dataset."""
+        try:
+            from_idx = self.dataset.episode_data_index["from"][self.episode_idx].item()
+            to_idx = self.dataset.episode_data_index["to"][self.episode_idx].item()
+        except Exception as e:
+            # Fallback if attributes differ
+            from_idx = int(self.dataset.episode_data_index["from"][self.episode_idx])
+            to_idx = int(self.dataset.episode_data_index["to"][self.episode_idx])
         self.episode_start_idx = from_idx
         self.episode_end_idx = to_idx
-        self.episode_length = to_idx - from_idx
-        print(f"📏 Episode {self.episode_idx}: {self.episode_length} steps")
-        
-    def _setup_mujoco(self):
-        """Setup MuJoCo simulation using existing SO101 arm."""
+        self.episode_length = max(1, to_idx - from_idx)
+        print("📏 Episode {}: {} steps".format(self.episode_idx, self.episode_length))
+
+
+    def _predict_next_chunk_async(self, batch):
         try:
-            # Use the existing SO101 arm XML file
-            # xml_path = "lerobot_some_original_code/standalone_scene.xml"
-            xml_path = "lerobot_some_original_code/simple_scene.xml"
-            
-            self.mujoco_model = mujoco.MjModel.from_xml_path(xml_path)
-            self.mujoco_data = mujoco.MjData(self.mujoco_model)
-            
-            # Map Mujoco joint names (same as teleoperate_sim_aditya.py)
-            mujoco_joint_names = [self.mujoco_model.joint(i).name for i in range(self.mujoco_model.njnt)]
-            print(f"MuJoCo joint names: {mujoco_joint_names}")
-            
-            # Map joint indices for joints "1" through "6"
-            try:
-                self.mujoco_joint_indices = [mujoco_joint_names.index(str(i)) for i in range(1, 7)]
-                print(f"Joint indices: {self.mujoco_joint_indices}")
-            except ValueError as e:
-                print(f"⚠️  Could not find all joints 1-6: {e}")
-                # Fallback to first 6 joints
-                self.mujoco_joint_indices = list(range(min(6, self.mujoco_model.njnt)))
-                print(f"Using fallback indices: {self.mujoco_joint_indices}")
-            
-            print("MuJoCo SO101 arm simulation initialized!")
-            
-        except Exception as e:
-            print(f"⚠️  MuJoCo setup failed: {e}")
-            print(f"   Make sure {xml_path} exists")
-            self.mujoco_model = None
-            self.mujoco_data = None
-            self.mujoco_joint_indices = None
+            with torch.no_grad():
+                predicted_action_chunk = self.policy.select_action(batch)
+                if predicted_action_chunk.dim() == 3:
+                    next_buf = predicted_action_chunk[0, :, :].cpu().numpy()
+                else:
+                    next_buf = [predicted_action_chunk[0, :].cpu().numpy()]
+            with self._prefetch_lock:
+                self.next_action_buffer = next_buf
+        except Exception:
+            # On failure, clear next buffer
+            with self._prefetch_lock:
+                self.next_action_buffer = None
+    
     
     def get_policy_action_and_apply(self):
         """Get policy action from real image and apply to robot."""
@@ -310,18 +441,56 @@ class RobotControlSimulator:
         if self.model_type in ["smolvla", "pi0fast"]:
             batch["task"] = "grab red cube and put to left"
         
-        # Get policy prediction
-        start_time = time.time()
-        with torch.no_grad():
-            predicted_action_chunk = self.policy.select_action(batch)
-            
-            # Handle action chunking - take first action
-            if predicted_action_chunk.dim() == 3:  # [batch, chunk_size, action_dim]
-                predicted_action = predicted_action_chunk[0, 0, :].cpu().numpy()
-            else:  # [batch, action_dim]
-                predicted_action = predicted_action_chunk[0, :].cpu().numpy()
+        # Handle async inference for VLA models (with prefetch to avoid stops)
+        if self.async_inference and self.model_type in ["smolvla", "pi0fast"]:
+            # If we have buffered actions, serve next
+            if getattr(self, "action_buffer", None) and self.buffer_index < len(self.action_buffer):
+                predicted_action = self.action_buffer[self.buffer_index]
+                self.buffer_index += 1
+                prediction_time = 0.0
                 
-        prediction_time = time.time() - start_time
+                # Trigger prefetch before buffer runs out
+                remaining = len(self.action_buffer) - self.buffer_index
+                if remaining <= max(1, self.prefetch_margin):
+                    with self._prefetch_lock:
+                        need_prefetch = self.next_action_buffer is None and (self._prefetch_thread is None or not self._prefetch_thread.is_alive())
+                    if need_prefetch:
+                        # Start background prediction using latest observation
+                        self._prefetch_thread = threading.Thread(target=self._predict_next_chunk_async, args=(batch,), daemon=True)
+                        self._prefetch_thread.start()
+                
+                # If buffer exhausted and we have a next buffer ready, swap
+                if self.buffer_index >= len(self.action_buffer):
+                    with self._prefetch_lock:
+                        if self.next_action_buffer is not None:
+                            self.action_buffer = self.next_action_buffer
+                            self.next_action_buffer = None
+                            self.buffer_index = 0
+                
+            else:
+                # No buffer: compute (blocking) a new chunk
+                start_time = time.time()
+                with torch.no_grad():
+                    predicted_action_chunk = self.policy.select_action(batch)
+                    if predicted_action_chunk.dim() == 3:
+                        self.action_buffer = predicted_action_chunk[0, :, :].cpu().numpy()
+                    else:
+                        self.action_buffer = [predicted_action_chunk[0, :].cpu().numpy()]
+                    predicted_action = self.action_buffer[0]
+                    self.buffer_index = 1
+                prediction_time = time.time() - start_time
+        else:
+            # Synchronous inference
+            start_time = time.time()
+            with torch.no_grad():
+                predicted_action_chunk = self.policy.select_action(batch)
+                
+                # Handle action chunking - take first action for synchronous mode
+                if predicted_action_chunk.dim() == 3:  # [batch, chunk_size, action_dim]
+                    predicted_action = predicted_action_chunk[0, 0, :].cpu().numpy()
+                else:  # [batch, action_dim]
+                    predicted_action = predicted_action_chunk[0, :].cpu().numpy()
+            prediction_time = time.time() - start_time
         
         # Apply action to simulated robot
         self._apply_action_to_robot(predicted_action)
@@ -380,6 +549,28 @@ class RobotControlSimulator:
             # Update positions
             self.robot_joint_positions += desired_velocity * dt
             self.joint_velocities = desired_velocity
+
+    def _setup_mujoco(self):
+        """Setup MuJoCo simulation using existing SO101 arm (safe no-op on failure)."""
+        try:
+            xml_path = "lerobot_some_original_code/simple_scene.xml"
+            self.mujoco_model = mujoco.MjModel.from_xml_path(xml_path)
+            self.mujoco_data = mujoco.MjData(self.mujoco_model)
+            mujoco_joint_names = [self.mujoco_model.joint(i).name for i in range(self.mujoco_model.njnt)]
+            print("MuJoCo joint names: {}".format(mujoco_joint_names))
+            try:
+                self.mujoco_joint_indices = [mujoco_joint_names.index(str(i)) for i in range(1, 7)]
+                print("Joint indices: {}".format(self.mujoco_joint_indices))
+            except ValueError as e:
+                print("⚠️  Could not find all joints 1-6: {}".format(e))
+                self.mujoco_joint_indices = list(range(min(6, self.mujoco_model.njnt)))
+                print("Using fallback indices: {}".format(self.mujoco_joint_indices))
+            print("MuJoCo SO101 arm simulation initialized!")
+        except Exception as e:
+            print("⚠️  MuJoCo setup failed: {}".format(e))
+            self.mujoco_model = None
+            self.mujoco_data = None
+            self.mujoco_joint_indices = None
 
 
 class RobotControlVisualizer:
@@ -584,7 +775,7 @@ def analyze_control_performance(action_history, position_history, velocity_histo
 
 
 def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, start_step=0,
-                                max_steps=100, speed=1.0, visualize=True, use_mujoco=True, camera_remap=None):
+                                max_steps=100, speed=1.0, visualize=True, use_mujoco=True, camera_remap=None, async_inference=False, prefetch_margin=10):
     """Main robot control simulation loop."""
     
     print("🤖 Robot Control Simulation")
@@ -596,10 +787,11 @@ def run_robot_control_simulation(policy_path, dataset_name, episode_idx=0, start
     print(f"🎯 Max Steps: {max_steps}")
     print(f"⚡ Speed: {speed}x")
     print(f"🖥️  MuJoCo: {'Enabled' if use_mujoco and MUJOCO_AVAILABLE else 'Disabled'}")
+    print(f"🔄 Async Inference: {'Enabled' if async_inference else 'Disabled'}")
     print()
     
     # Initialize simulator
-    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx, start_step, camera_remap=camera_remap)
+    simulator = RobotControlSimulator(policy_path, dataset_name, episode_idx, start_step, camera_remap=camera_remap, async_inference=async_inference, prefetch_margin=prefetch_margin)
     
     if not use_mujoco:
         simulator.mujoco_model = None
@@ -748,6 +940,10 @@ def main():
                        help="Camera remapping (e.g., 'observation.images.front:observation.images.wrist')")
     parser.add_argument('--model-type', type=str, default=None, 
                        help="Force model type (act, diffusion, vqbet, smolvla, pi0fast). Auto-detected if not specified.")
+    parser.add_argument('--async-inference', action='store_true',
+                       help='Enable asynchronous inference for VLA models (SmolVLA, π0-FAST)')
+    parser.add_argument('--prefetch-margin', type=int, default=20,
+                       help='When async-inference is enabled, start precomputing next chunk when this many actions remain in current buffer')
     
     args = parser.parse_args()
     
@@ -775,7 +971,9 @@ def main():
             speed=args.speed,
             visualize=not args.no_visualization,
             use_mujoco=not args.no_mujoco,
-            camera_remap=camera_remap
+            camera_remap=camera_remap,
+            async_inference=args.async_inference,
+            prefetch_margin=args.prefetch_margin
         )
         return 0
     
