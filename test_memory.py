@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Test GPU memory usage with different batch sizes for diffusion model.
 """
 
 import torch
+import torch.nn.functional as F
 import argparse
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.configs.policies import FeatureType
 from torch.utils.data import DataLoader, Subset
+
 
 def test_memory_usage(batch_size=8, model_type="diffusion"):
     """Test GPU memory usage with given batch size."""
@@ -28,9 +33,10 @@ def test_memory_usage(batch_size=8, model_type="diffusion"):
         print(f"Initial GPU Memory: {initial_memory:.2f}GB / {total_memory:.2f}GB")
     
     try:
-        # Load dataset
+        # Load dataset and metadata
         print("\n📊 Loading dataset...")
         dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+        metadata = LeRobotDatasetMetadata("bearlover365/red_cube_always_in_same_place")
         
         # Create small subset for testing
         test_indices = list(range(min(100, len(dataset))))
@@ -48,11 +54,23 @@ def test_memory_usage(batch_size=8, model_type="diffusion"):
         # Setup model with proper configuration
         print(f"\n🧠 Setting up {model_type.upper()} model...")
         if model_type == "diffusion":
+            # Convert dataset features to policy features
+            features = dataset_to_policy_features(metadata.features)
+            output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+            input_features = {key: ft for key, ft in features.items() if key not in output_features}
+            
             # Configure diffusion model with proper input features
-            config = DiffusionConfig()
-            config.input_features = ["observation.state", "observation.images.front"]
-            config.output_features = ["action"]
-            policy = DiffusionPolicy(config)
+            config = DiffusionConfig(
+                input_features=input_features,
+                output_features=output_features,
+                n_obs_steps=1,
+                horizon=8,
+                n_action_steps=4,
+                vision_backbone="resnet18",
+                crop_shape=(64, 64),
+                num_train_timesteps=50,
+            )
+            policy = DiffusionPolicy(config, dataset_stats=metadata.stats)
         else:
             raise ValueError(f"Model type {model_type} not supported")
         
@@ -72,6 +90,40 @@ def test_memory_usage(batch_size=8, model_type="diffusion"):
             if isinstance(batch[key], torch.Tensor):
                 batch[key] = batch[key].to(device, non_blocking=True)
         
+        # Resize image inputs to match config.crop_shape and ensure time dim [B, T, C, H, W]
+        if "observation.images.front" in batch:
+            img = batch["observation.images.front"]  # [B, T?, 3, H, W] or [B, 3, H, W]
+            if img.dim() == 5:
+                # If temporal dimension present, resize per frame
+                b, t, c, h, w = img.shape
+                img = img.view(b * t, c, h, w)
+                img = F.interpolate(img, size=(64, 64), mode="bilinear", align_corners=False)
+                img = img.view(b, t, c, 64, 64)
+            else:
+                img = F.interpolate(img, size=(64, 64), mode="bilinear", align_corners=False)
+                img = img.unsqueeze(1)  # add time dim -> [B, 1, 3, 64, 64]
+            batch["observation.images.front"] = img
+
+        # Ensure action has horizon dimension and add action_is_pad
+        horizon = config.horizon
+        if "action" in batch:
+            action = batch["action"]  # [B, A] or [B, H, A]
+            if action.dim() == 2:
+                b, a = action.shape
+                action = action.unsqueeze(1).expand(b, horizon, a)
+            batch["action"] = action
+
+        if "action_is_pad" not in batch:
+            b = next(v.shape[0] for v in batch.values() if isinstance(v, torch.Tensor))
+            batch["action_is_pad"] = torch.zeros(b, horizon, dtype=torch.bool, device=device)
+
+        # Ensure observation.state has n_obs_steps dimension
+        if "observation.state" in batch:
+            obs_state = batch["observation.state"]  # [B, S] or [B, T, S]
+            if obs_state.dim() == 2:
+                obs_state = obs_state.unsqueeze(1)  # [B, 1, S]
+            batch["observation.state"] = obs_state
+
         # Measure memory before forward pass
         if device.type == "cuda":
             memory_before = torch.cuda.memory_allocated() / 1024**3

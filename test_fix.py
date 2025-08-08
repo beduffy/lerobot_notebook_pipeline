@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Test the memory fix for diffusion models.
 """
 
 import torch
+import torch.nn.functional as F
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.configs.policies import FeatureType
+
 
 def test_memory_fix():
     """Test if the memory fix works."""
@@ -23,13 +28,19 @@ def test_memory_fix():
         print(f"Initial GPU Memory: {initial_memory:.2f}GB / {total_memory:.2f}GB")
     
     try:
-        # Load dataset
+        # Load dataset and metadata
         dataset = LeRobotDataset("bearlover365/red_cube_always_in_same_place")
+        metadata = LeRobotDatasetMetadata("bearlover365/red_cube_always_in_same_place")
+        
+        # Convert dataset features to policy features
+        features = dataset_to_policy_features(metadata.features)
+        output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
+        input_features = {key: ft for key, ft in features.items() if key not in output_features}
         
         # Create memory-efficient config
         config = DiffusionConfig(
-            input_features=["observation.state", "observation.images.front"],
-            output_features=["action"],
+            input_features=input_features,
+            output_features=output_features,
             n_obs_steps=1,
             horizon=8,
             n_action_steps=4,
@@ -39,7 +50,7 @@ def test_memory_fix():
         )
         
         # Create policy
-        policy = DiffusionPolicy(config, dataset_stats=dataset.stats)
+        policy = DiffusionPolicy(config, dataset_stats=metadata.stats)
         
         # Enable gradient checkpointing
         if hasattr(policy, 'gradient_checkpointing_enable'):
@@ -59,17 +70,42 @@ def test_memory_fix():
             memory_after_model = torch.cuda.memory_allocated() / 1024**3
             print(f"Memory after model: {memory_after_model:.2f}GB")
         
-        # Create minimal batch
+        # Get actual sample from dataset
+        sample = dataset[0]
         batch_size = 1
-        dummy_batch = {
-            "observation.state": torch.randn(batch_size, 1, 7),
-            "observation.images.front": torch.randn(batch_size, 1, 3, 64, 64),
-            "action": torch.randn(batch_size, 4, 7),
-        }
+        dummy_batch = {}
         
-        # Move to device
-        for key in dummy_batch:
-            dummy_batch[key] = dummy_batch[key].to(device, non_blocking=True)
+        # Create batch with proper shapes
+        for key, value in sample.items():
+            if isinstance(value, torch.Tensor):
+                # Add batch dimension
+                dummy_batch[key] = value.unsqueeze(0).to(device, non_blocking=True)
+        
+        # Reshape action to match horizon (8 steps)
+        if "action" in dummy_batch:
+            action = dummy_batch["action"]  # Shape: [1, 6]
+            # Repeat action to match horizon
+            action = action.unsqueeze(1).expand(1, 8, 6)  # Shape: [1, 8, 6]
+            dummy_batch["action"] = action
+        
+        # Reshape observation state to match n_obs_steps (1 step)
+        if "observation.state" in dummy_batch:
+            obs_state = dummy_batch["observation.state"]  # Shape: [1, 6]
+            # Repeat observation to match n_obs_steps
+            obs_state = obs_state.unsqueeze(1).expand(1, 1, 6)  # Shape: [1, 1, 6]
+            dummy_batch["observation.state"] = obs_state
+        
+        # Add required action_is_pad field for diffusion model
+        dummy_batch["action_is_pad"] = torch.zeros(1, 8, dtype=torch.bool, device=device)
+        
+        # Resize image inputs to match config.crop_shape and add time dim [B, T, C, H, W]
+        if "observation.images.front" in dummy_batch:
+            img = dummy_batch["observation.images.front"]  # [1, 3, H, W]
+            img = F.interpolate(img, size=(64, 64), mode="bilinear", align_corners=False)
+            dummy_batch["observation.images.front"] = img.unsqueeze(1)  # [1, 1, 3, 64, 64]
+
+        print(f"   Batch keys: {list(dummy_batch.keys())}")
+        print(f"   Batch shapes: {[(k, v.shape) for k, v in dummy_batch.items()]}")
         
         # Test forward pass
         print(f"\n🚀 Testing forward pass...")
