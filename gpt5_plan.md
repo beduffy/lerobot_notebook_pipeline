@@ -43,6 +43,83 @@ I need help ideating and getting motivation of what to work on... for robots and
     - Daichi Imai
     - Andrew Johnson
 
+## CPU‑only 1‑Week Sprint (Aug 8–14, 2025)
+
+Goal: Produce a clean CPU-only baseline: quick single-episode ACT training + analysis + visualizations + CPU inference benchmarking across models. No GPU required.
+
+Day 1 — Health check and fast dataset analysis (CPU)
+- Command:
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python analyse_dataset.py \
+    bearlover365/red_cube_always_in_same_place \
+    --fast \
+    --output-dir data/plots
+  ```
+- Deliverables: updated stats, action histograms, sample visuals in `data/plots/`.
+
+Day 2 — Single-episode ACT training on CPU (short run)
+- Command:
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python train_single_episode.py \
+    --dataset bearlover365/red_cube_always_in_same_place \
+    --episode 0 \
+    --steps 500 \
+    --no-plot \
+    --quick-eval
+  ```
+- Deliverables: `single_episode_model/` with checkpoint + `training_curve.png`.
+
+Day 3 — Visualize trained policy (CPU)
+- Command:
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python visualize_policy.py \
+    --policy-path single_episode_model \
+    --dataset bearlover365/red_cube_always_in_same_place \
+    --episode 0
+  ```
+- Deliverables: MAE/RMSE and per-joint plots on screen.
+
+Day 4 — Evaluate trained model and save plots (CPU)
+- Command:
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python evaluate_model.py \
+    single_episode_model \
+    --dataset bearlover365/red_cube_always_in_same_place \
+    --episode 0 \
+    --plot --save-plots \
+    --output-dir single_episode_model/plots
+  ```
+- Deliverables: Saved prediction vs ground truth plots in `single_episode_model/plots/`.
+
+Day 5 — CPU inference benchmarking across models (quick)
+- Command (50 samples quick run on CPU):
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python test_model_inference.py \
+    --dataset bearlover365/red_cube_always_in_same_place \
+    --models act,vqbet,smolvla,diffusion \
+    --device cpu \
+    --quick
+  ```
+- Deliverables: FPS and memory notes for CPU; confirm ACT/VQBet realtime-ish, SmolVLA/Diffusion slower.
+
+Day 6 — Episode and augmentation visuals (CPU)
+- Command (save plots):
+  ```bash
+  /home/ben/miniconda3/envs/robosuite/bin/python demo_visualizations.py \
+    bearlover365/red_cube_always_in_same_place \
+    --demo comprehensive \
+    --output-dir data/plots
+  ```
+- Deliverables: additional visuals for video/blog.
+
+Day 7 — Wrap-up and next micro-experiment definition
+- Write short summary (results, timings, errors) and define next CPU task: “1 vs 5 demos” training curve on ACT (CPU), or start position-variation collection script.
+
+Notes (CPU tips)
+- Force `--video-backend pyav` (defaults already align) for stability on CPU.
+- Use the env’s Python path to avoid shell activation issues.
+- Keep steps modest on CPU runs; rely on quick evaluation to gauge trends.
+
 ## July 2025
 
 ## July day log
