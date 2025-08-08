@@ -37,6 +37,7 @@ def test_visualize_augmentations(sample_image):
         plt.close()
 
 
+@pytest.mark.slow
 def test_plot_action_histogram(simple_dataset):
     """
     Tests the plot_action_histogram function.

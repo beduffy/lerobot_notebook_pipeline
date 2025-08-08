@@ -26,6 +26,7 @@ def run_script_with_timeout(script_path, args, timeout=60):
     except subprocess.TimeoutExpired:
         return None
 
+
 @pytest.mark.slow
 def test_full_analysis_pipeline():
     """Test the complete analysis pipeline from dataset loading to visualization."""
@@ -226,6 +227,7 @@ def test_visualization_pipeline():
         else:
             print("⚠️  Visualization pipeline not fully accessible")
 
+@pytest.mark.slow
 def test_configuration_propagation():
     """Test that configurations propagate correctly through the pipeline."""
     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -258,6 +260,7 @@ def test_configuration_propagation():
         
         print("✅ Configuration propagation works")
 
+@pytest.mark.slow
 def test_error_recovery_workflow():
     """Test error recovery in workflows."""
     # Test with invalid dataset
@@ -327,6 +330,7 @@ def test_memory_usage_workflow():
     except Exception as e:
         pytest.skip(f"Memory test failed: {e}")
 
+@pytest.mark.slow
 def test_device_workflow_compatibility():
     """Test that workflows work on different devices."""
     import torch

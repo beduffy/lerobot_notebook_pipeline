@@ -41,6 +41,8 @@ def test_dataset_structure(working_dataset):
     print(f"✅ Dataset structure validated")
 
 
+
+@pytest.mark.slow
 def test_analysis_functions(working_dataset):
     """Test that analysis functions work without errors."""
     # Test basic stats
@@ -57,6 +59,7 @@ def test_analysis_functions(working_dataset):
     print(f"✅ Analysis functions work correctly")
 
 
+@pytest.mark.slow
 def test_visualization_functions(working_dataset, tmp_path):
     """Test that visualization functions create plots."""
     # Test action histograms
@@ -73,6 +76,7 @@ def test_visualization_functions(working_dataset, tmp_path):
     print(f"✅ Visualization functions work correctly")
 
 
+@pytest.mark.slow
 def test_single_episode_experiment_config():
     """Test that single episode experiment creates proper configs."""
     from single_episode_experiment import run_single_episode_experiment
@@ -122,6 +126,7 @@ def test_data_collection_protocol():
     print(f"✅ Data collection protocol works")
 
 
+@pytest.mark.slow
 def test_analysis_script_integration():
     """Test that the main analysis script works end-to-end."""
     import subprocess
