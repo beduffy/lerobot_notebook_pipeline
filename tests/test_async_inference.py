@@ -21,6 +21,7 @@ import time
 import numpy as np
 import threading
 from pathlib import Path
+import pytest
 
 # Import our async inference components
 import sys
@@ -104,6 +105,7 @@ def run_local_async_inference_test(model_type: str = "pi0fast"):
             engine.shutdown()
 
 
+@pytest.mark.slow
 def test_local_async_inference():
     """Pytest wrapper for local async inference test."""
     import pytest
